@@ -36,9 +36,10 @@ public class CommentController {
     }
 
     @DeleteMapping("/{id}")
-    public Result<Void> deleteComment(@PathVariable Long id) {
+    public Result<Void> deleteComment(@PathVariable Long id,
+                                      @AuthenticationPrincipal User user) {
         try {
-            commentService.deleteComment(id);
+            commentService.deleteComment(id, user);
             return Result.success();
         } catch (Exception e) {
             return Result.error(e.getMessage());

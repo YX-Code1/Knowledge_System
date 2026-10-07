@@ -20,7 +20,12 @@ public class User {
 
     private String avatar;
 
-    /** 账户余额 */
+    /**
+     * 账户余额
+     * 仅通过 UserMapper 的原子 SQL 变更；updateById 不回写该字段，
+     * 防止"改昵称时把旧余额写回、覆盖掉并发到账"这类丢失更新
+     */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private java.math.BigDecimal balance;
 
     private String role;

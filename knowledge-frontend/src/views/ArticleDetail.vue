@@ -112,6 +112,7 @@ import { getArticle, likeArticle, toggleFavorite, checkFavorite, getComments, cr
 import { useUserStore } from '@/store/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 const route = useRoute()
 const router = useRouter()
@@ -140,7 +141,9 @@ const categoryName = computed(() => {
 
 const renderedContent = computed(() => {
   if (!article.value.content) return ''
-  return marked.parse(article.value.content)
+  // marked 只负责 Markdown→HTML；v-html 渲染前必须经 DOMPurify 消毒，
+  // 防止存储型 XSS（marked 5.x 起已移除内置 sanitize 选项）
+  return DOMPurify.sanitize(marked.parse(article.value.content))
 })
 
 const isAuthor = computed(() => userStore.userInfo?.userId === article.value.authorId)

@@ -23,10 +23,17 @@ public class Article {
 
     private Long authorId;
 
+    /**
+     * 阅读量/点赞数/评论数：仅由 ArticleMapper 的原子 SQL 维护，
+     * updateById 不回写，防止编辑文章时把期间的并发增量覆盖掉
+     */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private Integer viewCount;
 
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private Integer likeCount;
 
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private Integer commentCount;
 
     private Integer status;

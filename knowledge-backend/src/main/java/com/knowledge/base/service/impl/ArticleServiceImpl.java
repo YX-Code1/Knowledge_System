@@ -24,6 +24,7 @@ import com.knowledge.base.service.ArticleService;
 import com.knowledge.base.vo.ArticleVO;
 import com.knowledge.base.vo.TagVO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -350,15 +351,23 @@ public class ArticleServiceImpl implements ArticleService {
     public void likeArticle(Long id, Long userId) {
         if (hasLiked(id, userId)) {
             // 已点过赞，再点一次取消点赞
-            articleLikeMapper.delete(new LambdaQueryWrapper<ArticleLike>()
+            // 只有真正删除了点赞行才回写计数，防止并发重复取消导致 like_count 漂移
+            int rows = articleLikeMapper.delete(new LambdaQueryWrapper<ArticleLike>()
                     .eq(ArticleLike::getArticleId, id)
                     .eq(ArticleLike::getUserId, userId));
-            articleMapper.updateLikeCount(id, -1);
+            if (rows > 0) {
+                articleMapper.updateLikeCount(id, -1);
+            }
         } else {
             ArticleLike like = new ArticleLike();
             like.setArticleId(id);
             like.setUserId(userId);
-            articleLikeMapper.insert(like);
+            try {
+                articleLikeMapper.insert(like);
+            } catch (DuplicateKeyException e) {
+                // 并发点赞：唯一键兜底，对方已点过，本次视为成功但不重复计数
+                return;
+            }
             articleMapper.updateLikeCount(id, 1);
         }
     }

@@ -2,6 +2,7 @@ package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.knowledge.base.entity.Comment;
+import com.knowledge.base.entity.User;
 import com.knowledge.base.mapper.ArticleMapper;
 import com.knowledge.base.mapper.CommentMapper;
 import com.knowledge.base.service.CommentService;
@@ -40,10 +41,18 @@ public class CommentServiceImpl implements CommentService {
 
     @Override
     @Transactional
-    public void deleteComment(Long id) {
+    public void deleteComment(Long id, User currentUser) {
         Comment comment = commentMapper.selectById(id);
-        if (comment != null) {
-            commentMapper.deleteById(id);
+        if (comment == null) {
+            throw new RuntimeException("评论不存在");
+        }
+        // 归属校验：仅评论作者或管理员可删除，防止越权删除他人评论
+        boolean isAdmin = "ADMIN".equals(currentUser.getRole()) || "SUPER_ADMIN".equals(currentUser.getRole());
+        if (!comment.getUserId().equals(currentUser.getId()) && !isAdmin) {
+            throw new RuntimeException("只能删除自己的评论");
+        }
+        // 只有真正删除了行才回写计数，避免并发重复删除导致评论数漂移
+        if (commentMapper.deleteById(id) > 0) {
             articleMapper.updateCommentCount(comment.getArticleId(), -1);
         }
     }

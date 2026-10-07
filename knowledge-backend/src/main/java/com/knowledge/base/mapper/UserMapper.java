@@ -11,11 +11,11 @@ import java.math.BigDecimal;
 @Mapper
 public interface UserMapper extends BaseMapper<User> {
 
-    /** 原子加余额 */
-    @Update("UPDATE sys_user SET balance = balance + #{delta} WHERE id = #{id}")
+    /** 原子加余额（手写 SQL 自带 deleted=0，与逻辑删除约定一致） */
+    @Update("UPDATE sys_user SET balance = balance + #{delta} WHERE id = #{id} AND deleted = 0")
     int addBalance(@Param("id") Long id, @Param("delta") BigDecimal delta);
 
     /** 原子扣余额（余额不足时更新 0 行，防并发透支） */
-    @Update("UPDATE sys_user SET balance = balance - #{delta} WHERE id = #{id} AND balance >= #{delta}")
+    @Update("UPDATE sys_user SET balance = balance - #{delta} WHERE id = #{id} AND balance >= #{delta} AND deleted = 0")
     int deductBalanceIfEnough(@Param("id") Long id, @Param("delta") BigDecimal delta);
 }

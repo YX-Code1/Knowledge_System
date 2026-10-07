@@ -39,7 +39,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/articles/**").permitAll()
                 .requestMatchers("/api/categories/**").permitAll()
                 .requestMatchers("/api/tags/**").permitAll()
-                .requestMatchers("/api/comments/**").permitAll()
+                // 评论列表公开浏览；发评论/删评论必须登录（归属校验在 CommentServiceImpl）
+                .requestMatchers(HttpMethod.GET, "/api/comments/**").permitAll()
                 .requestMatchers("/api/stats/**").permitAll()
                 .requestMatchers("/api/favorites/**").authenticated()
                 // 合集：广场与详情公开浏览；"我的合集"必须登录。
