@@ -1,0 +1,23 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Java / Maven
+**/target/
+
+# Node / 前端
+knowledge-frontend/node_modules/
+knowledge-frontend/dist/
+
+# 本机敏感配置（真实密码只在这里，不入库；模板见 application-local.yml.example）
+knowledge-backend/src/main/resources/application-local.yml
+
+# 日志
+*.log
+logs/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
