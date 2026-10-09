@@ -1,6 +1,8 @@
 package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.knowledge.base.common.BusinessException;
+import com.knowledge.base.dto.CommentRequest;
 import com.knowledge.base.entity.Comment;
 import com.knowledge.base.entity.User;
 import com.knowledge.base.mapper.ArticleMapper;
@@ -33,7 +35,12 @@ public class CommentServiceImpl implements CommentService {
 
     @Override
     @Transactional
-    public CommentVO createComment(Comment comment) {
+    public CommentVO createComment(CommentRequest request, Long userId) {
+        Comment comment = new Comment();
+        comment.setArticleId(request.getArticleId());
+        comment.setUserId(userId);
+        comment.setContent(request.getContent());
+        comment.setParentId(request.getParentId());
         commentMapper.insert(comment);
         articleMapper.updateCommentCount(comment.getArticleId(), 1);
         return CommentVO.from(comment);
@@ -44,12 +51,12 @@ public class CommentServiceImpl implements CommentService {
     public void deleteComment(Long id, User currentUser) {
         Comment comment = commentMapper.selectById(id);
         if (comment == null) {
-            throw new RuntimeException("评论不存在");
+            throw new BusinessException("评论不存在");
         }
         // 归属校验：仅评论作者或管理员可删除，防止越权删除他人评论
         boolean isAdmin = "ADMIN".equals(currentUser.getRole()) || "SUPER_ADMIN".equals(currentUser.getRole());
         if (!comment.getUserId().equals(currentUser.getId()) && !isAdmin) {
-            throw new RuntimeException("只能删除自己的评论");
+            throw new BusinessException("只能删除自己的评论");
         }
         // 只有真正删除了行才回写计数，避免并发重复删除导致评论数漂移
         if (commentMapper.deleteById(id) > 0) {

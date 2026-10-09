@@ -1,9 +1,10 @@
 package com.knowledge.base.controller;
 
 import com.knowledge.base.common.Result;
-import com.knowledge.base.entity.Category;
+import com.knowledge.base.dto.CategoryRequest;
 import com.knowledge.base.service.CategoryService;
 import com.knowledge.base.vo.CategoryVO;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -24,34 +25,21 @@ public class CategoryController {
 
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public Result<CategoryVO> createCategory(@RequestBody Category category) {
-        try {
-            CategoryVO c = categoryService.createCategory(category);
-            return Result.success(c);
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+    public Result<CategoryVO> createCategory(@Valid @RequestBody CategoryRequest request) {
+        return Result.success(categoryService.createCategory(request));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public Result<CategoryVO> updateCategory(@PathVariable Long id, @RequestBody Category category) {
-        try {
-            CategoryVO c = categoryService.updateCategory(id, category);
-            return Result.success(c);
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+    public Result<CategoryVO> updateCategory(@PathVariable Long id,
+                                             @Valid @RequestBody CategoryRequest request) {
+        return Result.success(categoryService.updateCategory(id, request));
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public Result<Void> deleteCategory(@PathVariable Long id) {
-        try {
-            categoryService.deleteCategory(id);
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        categoryService.deleteCategory(id);
+        return Result.success();
     }
 }

@@ -1,10 +1,11 @@
 package com.knowledge.base.controller;
 
 import com.knowledge.base.common.Result;
-import com.knowledge.base.entity.Comment;
+import com.knowledge.base.dto.CommentRequest;
 import com.knowledge.base.entity.User;
 import com.knowledge.base.service.CommentService;
 import com.knowledge.base.vo.CommentVO;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -24,25 +25,15 @@ public class CommentController {
     }
 
     @PostMapping
-    public Result<CommentVO> createComment(@RequestBody Comment comment,
+    public Result<CommentVO> createComment(@Valid @RequestBody CommentRequest request,
                                          @AuthenticationPrincipal User user) {
-        try {
-            comment.setUserId(user.getId());
-            CommentVO c = commentService.createComment(comment);
-            return Result.success(c);
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(commentService.createComment(request, user.getId()));
     }
 
     @DeleteMapping("/{id}")
     public Result<Void> deleteComment(@PathVariable Long id,
                                       @AuthenticationPrincipal User user) {
-        try {
-            commentService.deleteComment(id, user);
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        commentService.deleteComment(id, user);
+        return Result.success();
     }
 }

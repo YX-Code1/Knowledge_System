@@ -2,6 +2,7 @@ package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.knowledge.base.common.BusinessException;
 import com.knowledge.base.dto.ArticleRequest;
 import com.knowledge.base.entity.Article;
 import com.knowledge.base.entity.ArticleLike;
@@ -9,6 +10,9 @@ import com.knowledge.base.entity.ArticlePurchase;
 import com.knowledge.base.entity.ArticleTag;
 import com.knowledge.base.entity.BalanceLog;
 import com.knowledge.base.entity.Category;
+import com.knowledge.base.entity.CollectionArticle;
+import com.knowledge.base.entity.Comment;
+import com.knowledge.base.entity.Favorite;
 import com.knowledge.base.entity.Tag;
 import com.knowledge.base.entity.User;
 import com.knowledge.base.mapper.ArticleLikeMapper;
@@ -17,7 +21,10 @@ import com.knowledge.base.mapper.ArticlePurchaseMapper;
 import com.knowledge.base.mapper.ArticleTagMapper;
 import com.knowledge.base.mapper.BalanceLogMapper;
 import com.knowledge.base.mapper.CategoryMapper;
+import com.knowledge.base.mapper.CollectionArticleMapper;
 import com.knowledge.base.mapper.CollectionPurchaseMapper;
+import com.knowledge.base.mapper.CommentMapper;
+import com.knowledge.base.mapper.FavoriteMapper;
 import com.knowledge.base.mapper.TagMapper;
 import com.knowledge.base.mapper.UserMapper;
 import com.knowledge.base.service.ArticleService;
@@ -60,6 +67,15 @@ public class ArticleServiceImpl implements ArticleService {
 
     @Autowired
     private ArticlePurchaseMapper articlePurchaseMapper;
+
+    @Autowired
+    private CommentMapper commentMapper;
+
+    @Autowired
+    private FavoriteMapper favoriteMapper;
+
+    @Autowired
+    private CollectionArticleMapper collectionArticleMapper;
 
     @Autowired
     private CollectionPurchaseMapper collectionPurchaseMapper;
@@ -229,7 +245,7 @@ public class ArticleServiceImpl implements ArticleService {
     @Transactional
     public ArticleVO updateArticle(Long id, ArticleRequest request, User currentUser) {
         Article article = articleMapper.selectById(id);
-        if (article == null) throw new RuntimeException("文章不存在");
+        if (article == null) throw new BusinessException("文章不存在");
         checkAuthorOrAdmin(article, currentUser);
 
         // 仅当分类发生变化时才校验（老文章改标题不受叶子限制影响）
@@ -259,36 +275,48 @@ public class ArticleServiceImpl implements ArticleService {
     }
 
     @Override
+    @Transactional
     public void deleteArticle(Long id, User currentUser) {
         Article article = articleMapper.selectById(id);
-        if (article == null) throw new RuntimeException("文章不存在");
+        if (article == null) throw new BusinessException("文章不存在");
         checkAuthorOrAdmin(article, currentUser);
+
+        // 文章本身逻辑删除（@TableLogic），同事务内级联清理关联数据，避免留下脏数据
         articleMapper.deleteById(id);
+        // 评论带 deleted 字段，同样走逻辑删除
+        commentMapper.delete(new LambdaQueryWrapper<Comment>().eq(Comment::getArticleId, id));
+        // 收藏 / 点赞 / 文章标签关联、合集收录无 deleted 字段，物理删除
+        favoriteMapper.delete(new LambdaQueryWrapper<Favorite>().eq(Favorite::getArticleId, id));
+        articleLikeMapper.delete(new LambdaQueryWrapper<ArticleLike>().eq(ArticleLike::getArticleId, id));
+        articleTagMapper.delete(new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getArticleId, id));
+        collectionArticleMapper.delete(new LambdaQueryWrapper<CollectionArticle>().eq(CollectionArticle::getArticleId, id));
+        // 注意：ArticlePurchase / BalanceLog 属于资金流水，删除文章不删购买记录（保留审计痕迹，
+        // 也不做退款——余额已结算给作者，退款需独立的对账流程，当前产品决策为不退款）
     }
 
     @Override
     @Transactional
     public BigDecimal purchaseArticle(Long id, Long buyerId) {
         Article article = articleMapper.selectById(id);
-        if (article == null) throw new RuntimeException("文章不存在");
+        if (article == null) throw new BusinessException("文章不存在");
         if (article.getPrice() == null || article.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException("该文章为免费文章，无需购买");
+            throw new BusinessException("该文章为免费文章，无需购买");
         }
         if (article.getAuthorId().equals(buyerId)) {
-            throw new RuntimeException("不能购买自己的文章");
+            throw new BusinessException("不能购买自己的文章");
         }
         if (articlePurchaseMapper.selectCount(new LambdaQueryWrapper<ArticlePurchase>()
                 .eq(ArticlePurchase::getArticleId, id)
                 .eq(ArticlePurchase::getBuyerId, buyerId)) > 0) {
-            throw new RuntimeException("您已购买过该文章");
+            throw new BusinessException("您已购买过该文章");
         }
         if (collectionPurchaseMapper.countByArticleAndBuyer(id, buyerId) > 0) {
-            throw new RuntimeException("您已通过购买合集获得该文章，无需重复购买");
+            throw new BusinessException("您已通过购买合集获得该文章，无需重复购买");
         }
 
         // 原子扣款，0 行即余额不足
         if (userMapper.deductBalanceIfEnough(buyerId, article.getPrice()) == 0) {
-            throw new RuntimeException("余额不足，请先充值");
+            throw new BusinessException("余额不足，请先充值");
         }
         // 平台 0% 抽成，全归作者
         userMapper.addBalance(article.getAuthorId(), article.getPrice());
@@ -323,11 +351,11 @@ public class ArticleServiceImpl implements ArticleService {
      */
     private void checkAuthorOrAdmin(Article article, User currentUser) {
         if (currentUser == null) {
-            throw new RuntimeException("请先登录");
+            throw new BusinessException("请先登录");
         }
         boolean isAdmin = "ADMIN".equals(currentUser.getRole()) || "SUPER_ADMIN".equals(currentUser.getRole());
         if (!currentUser.getId().equals(article.getAuthorId()) && !isAdmin) {
-            throw new RuntimeException("只能操作自己的文章");
+            throw new BusinessException("只能操作自己的文章");
         }
     }
 
@@ -336,13 +364,13 @@ public class ArticleServiceImpl implements ArticleService {
      */
     private void validateLeafCategory(Long categoryId) {
         if (categoryMapper.selectById(categoryId) == null) {
-            throw new RuntimeException("分类不存在");
+            throw new BusinessException("分类不存在");
         }
         Long childCount = categoryMapper.selectCount(
                 new LambdaQueryWrapper<Category>()
                         .eq(Category::getParentId, categoryId));
         if (childCount > 0) {
-            throw new RuntimeException("只能选择叶子分类（该分类下已有子分类）");
+            throw new BusinessException("只能选择叶子分类（该分类下已有子分类）");
         }
     }
 

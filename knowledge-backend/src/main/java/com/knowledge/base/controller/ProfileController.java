@@ -23,28 +23,21 @@ public class ProfileController {
     /** 获取自己的资料 */
     @GetMapping
     public Result<UserVO> getProfile(@AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            // VO 无密码字段，转换后即天然脱敏（也不再就地修改 principal）
-            return Result.success(UserVO.from(user));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        // 认证过滤器里的 principal 可能来自 Redis 缓存的部分字段（只有 id/role/status），
+        // 完整资料（昵称/邮箱/头像/余额）必须按 id 重新查库
+        return Result.success(userService.getProfile(user.getId()));
     }
 
     /** 修改自己的资料（昵称/邮箱/头像） */
     @PutMapping
     public Result<UserVO> updateProfile(@Valid @RequestBody ProfileUpdateRequest request,
                                       @AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            return Result.success(userService.updateProfile(user.getId(), request));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        return Result.success(userService.updateProfile(user.getId(), request));
     }
 }

@@ -1,9 +1,10 @@
 package com.knowledge.base.controller;
 
 import com.knowledge.base.common.Result;
-import com.knowledge.base.entity.Tag;
+import com.knowledge.base.dto.TagRequest;
 import com.knowledge.base.service.TagService;
 import com.knowledge.base.vo.TagVO;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -24,34 +25,20 @@ public class TagController {
 
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public Result<TagVO> createTag(@RequestBody Tag tag) {
-        try {
-            TagVO t = tagService.createTag(tag);
-            return Result.success(t);
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+    public Result<TagVO> createTag(@Valid @RequestBody TagRequest request) {
+        return Result.success(tagService.createTag(request));
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
-    public Result<TagVO> updateTag(@PathVariable Long id, @RequestBody Tag tag) {
-        try {
-            TagVO t = tagService.updateTag(id, tag);
-            return Result.success(t);
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+    public Result<TagVO> updateTag(@PathVariable Long id, @Valid @RequestBody TagRequest request) {
+        return Result.success(tagService.updateTag(id, request));
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'SUPER_ADMIN')")
     public Result<Void> deleteTag(@PathVariable Long id) {
-        try {
-            tagService.deleteTag(id);
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        tagService.deleteTag(id);
+        return Result.success();
     }
 }

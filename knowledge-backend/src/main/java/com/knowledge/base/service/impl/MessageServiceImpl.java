@@ -2,6 +2,7 @@ package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.knowledge.base.common.BusinessException;
 import com.knowledge.base.entity.Message;
 import com.knowledge.base.entity.User;
 import com.knowledge.base.entity.UserBlock;
@@ -32,17 +33,17 @@ public class MessageServiceImpl implements MessageService {
     @Override
     public MessageVO sendMessage(Long senderId, Long receiverId, String content) {
         if (senderId.equals(receiverId)) {
-            throw new RuntimeException("不能给自己发送私信");
+            throw new BusinessException("不能给自己发送私信");
         }
         if (userMapper.selectById(receiverId) == null) {
-            throw new RuntimeException("用户不存在");
+            throw new BusinessException("用户不存在");
         }
         // 拉黑拦截：任一方向拉黑均不可互发（历史消息保留可见）
         if (isBlocked(receiverId, senderId)) {
-            throw new RuntimeException("对方已将你拉黑，无法发送私信");
+            throw new BusinessException("对方已将你拉黑，无法发送私信");
         }
         if (isBlocked(senderId, receiverId)) {
-            throw new RuntimeException("你已拉黑该用户，请先解除拉黑");
+            throw new BusinessException("你已拉黑该用户，请先解除拉黑");
         }
         Message message = new Message();
         message.setSenderId(senderId);
@@ -128,10 +129,10 @@ public class MessageServiceImpl implements MessageService {
     @Override
     public void blockUser(Long userId, Long blockedId) {
         if (userId.equals(blockedId)) {
-            throw new RuntimeException("不能拉黑自己");
+            throw new BusinessException("不能拉黑自己");
         }
         if (isBlocked(userId, blockedId)) {
-            throw new RuntimeException("已拉黑该用户");
+            throw new BusinessException("已拉黑该用户");
         }
         UserBlock block = new UserBlock();
         block.setUserId(userId);

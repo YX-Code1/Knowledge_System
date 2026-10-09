@@ -1,6 +1,8 @@
 package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.knowledge.base.common.BusinessException;
+import com.knowledge.base.dto.TagRequest;
 import com.knowledge.base.entity.ArticleTag;
 import com.knowledge.base.entity.Tag;
 import com.knowledge.base.mapper.ArticleTagMapper;
@@ -53,8 +55,8 @@ public class TagServiceImpl implements TagService {
     }
 
     @Override
-    public TagVO createTag(Tag tag) {
-        String name = checkName(tag.getName());
+    public TagVO createTag(TagRequest request) {
+        String name = checkName(request.getName());
         checkDuplicate(name, null);
         Tag t = new Tag();
         t.setName(name);
@@ -63,11 +65,11 @@ public class TagServiceImpl implements TagService {
     }
 
     @Override
-    public TagVO updateTag(Long id, Tag tag) {
-        String name = checkName(tag.getName());
+    public TagVO updateTag(Long id, TagRequest request) {
+        String name = checkName(request.getName());
         Tag exist = tagMapper.selectById(id);
         if (exist == null) {
-            throw new RuntimeException("标签不存在");
+            throw new BusinessException("标签不存在");
         }
         checkDuplicate(name, id);
         exist.setName(name);
@@ -80,7 +82,7 @@ public class TagServiceImpl implements TagService {
     public void deleteTag(Long id) {
         Tag exist = tagMapper.selectById(id);
         if (exist == null) {
-            throw new RuntimeException("标签不存在");
+            throw new BusinessException("标签不存在");
         }
         // 先清理文章与标签的关联，再删除标签
         articleTagMapper.delete(new LambdaQueryWrapper<ArticleTag>().eq(ArticleTag::getTagId, id));
@@ -89,11 +91,11 @@ public class TagServiceImpl implements TagService {
 
     private String checkName(String name) {
         if (!StringUtils.hasText(name)) {
-            throw new RuntimeException("标签名称不能为空");
+            throw new BusinessException("标签名称不能为空");
         }
         String trimmed = name.trim();
         if (trimmed.length() > 20) {
-            throw new RuntimeException("标签名称不能超过20个字符");
+            throw new BusinessException("标签名称不能超过20个字符");
         }
         return trimmed;
     }
@@ -104,7 +106,7 @@ public class TagServiceImpl implements TagService {
             wrapper.ne(Tag::getId, excludeId);
         }
         if (tagMapper.selectCount(wrapper) > 0) {
-            throw new RuntimeException("标签已存在");
+            throw new BusinessException("标签已存在");
         }
     }
 }

@@ -14,4 +14,6 @@ public interface UserService {
     void adjustBalance(Long id, BigDecimal change, String remark);
     /** 修改自己的资料（昵称/邮箱/头像），返回更新后的用户（不含密码） */
     UserVO updateProfile(Long userId, ProfileUpdateRequest request);
+    /** 获取自己的完整资料（principal 可能是缓存的部分字段，必须重新查库） */
+    UserVO getProfile(Long userId);
 }

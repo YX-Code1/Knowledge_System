@@ -2,6 +2,7 @@ package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.knowledge.base.common.BusinessException;
 import com.knowledge.base.entity.Article;
 import com.knowledge.base.entity.Category;
 import com.knowledge.base.entity.Notification;
@@ -49,10 +50,10 @@ public class NotificationServiceImpl implements NotificationService {
     public void markRead(Long id, Long userId) {
         Notification notification = notificationMapper.selectById(id);
         if (notification == null) {
-            throw new RuntimeException("通知不存在");
+            throw new BusinessException("通知不存在");
         }
         if (!notification.getUserId().equals(userId)) {
-            throw new RuntimeException("无权操作该通知");
+            throw new BusinessException("无权操作该通知");
         }
         notification.setIsRead(1);
         notificationMapper.updateById(notification);

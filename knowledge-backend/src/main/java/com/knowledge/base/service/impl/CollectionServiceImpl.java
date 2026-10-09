@@ -2,6 +2,7 @@ package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.knowledge.base.common.BusinessException;
 import com.knowledge.base.dto.CollectionRequest;
 import com.knowledge.base.entity.*;
 import com.knowledge.base.mapper.*;
@@ -50,7 +51,7 @@ public class CollectionServiceImpl implements CollectionService {
     public CollectionVO getCollectionDetail(Long id, User currentUser) {
         ArticleCollection collection = collectionMapper.selectById(id);
         if (collection == null) {
-            throw new RuntimeException("合集不存在");
+            throw new BusinessException("合集不存在");
         }
         CollectionVO vo = new CollectionVO();
         vo.setId(collection.getId());
@@ -113,15 +114,15 @@ public class CollectionServiceImpl implements CollectionService {
         getOwnCollection(id, userId);
         Article article = articleMapper.selectById(articleId);
         if (article == null) {
-            throw new RuntimeException("文章不存在");
+            throw new BusinessException("文章不存在");
         }
         if (!article.getAuthorId().equals(userId)) {
-            throw new RuntimeException("只能添加自己的文章");
+            throw new BusinessException("只能添加自己的文章");
         }
         if (collectionArticleMapper.selectCount(new LambdaQueryWrapper<CollectionArticle>()
                 .eq(CollectionArticle::getCollectionId, id)
                 .eq(CollectionArticle::getArticleId, articleId)) > 0) {
-            throw new RuntimeException("该文章已在合集中");
+            throw new BusinessException("该文章已在合集中");
         }
         CollectionArticle ca = new CollectionArticle();
         ca.setCollectionId(id);
@@ -141,25 +142,25 @@ public class CollectionServiceImpl implements CollectionService {
     @Transactional
     public BigDecimal purchaseCollection(Long id, Long buyerId) {
         ArticleCollection collection = collectionMapper.selectById(id);
-        if (collection == null) throw new RuntimeException("合集不存在");
+        if (collection == null) throw new BusinessException("合集不存在");
         if (collection.getPrice() == null || collection.getPrice().compareTo(BigDecimal.ZERO) <= 0) {
-            throw new RuntimeException("该合集为免费合集，无需购买");
+            throw new BusinessException("该合集为免费合集，无需购买");
         }
         if (collection.getUserId().equals(buyerId)) {
-            throw new RuntimeException("不能购买自己的合集");
+            throw new BusinessException("不能购买自己的合集");
         }
         if (collectionPurchaseMapper.selectCount(new LambdaQueryWrapper<CollectionPurchase>()
                 .eq(CollectionPurchase::getCollectionId, id)
                 .eq(CollectionPurchase::getBuyerId, buyerId)) > 0) {
-            throw new RuntimeException("您已购买过该合集");
+            throw new BusinessException("您已购买过该合集");
         }
         if (collectionArticleMapper.selectCount(new LambdaQueryWrapper<CollectionArticle>()
                 .eq(CollectionArticle::getCollectionId, id)) == 0) {
-            throw new RuntimeException("该合集暂无文章，无法购买");
+            throw new BusinessException("该合集暂无文章，无法购买");
         }
 
         if (userMapper.deductBalanceIfEnough(buyerId, collection.getPrice()) == 0) {
-            throw new RuntimeException("余额不足，请先充值");
+            throw new BusinessException("余额不足，请先充值");
         }
         userMapper.addBalance(collection.getUserId(), collection.getPrice());
 
@@ -191,10 +192,10 @@ public class CollectionServiceImpl implements CollectionService {
     private ArticleCollection getOwnCollection(Long id, Long userId) {
         ArticleCollection collection = collectionMapper.selectById(id);
         if (collection == null) {
-            throw new RuntimeException("合集不存在");
+            throw new BusinessException("合集不存在");
         }
         if (!collection.getUserId().equals(userId)) {
-            throw new RuntimeException("只能操作自己的合集");
+            throw new BusinessException("只能操作自己的合集");
         }
         return collection;
     }

@@ -43,74 +43,50 @@ public class ArticleController {
     public Result<Page<ArticleVO>> getMyArticles(@RequestParam(defaultValue = "1") int page,
                                                @RequestParam(defaultValue = "10") int size,
                                                @AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            return Result.success(articleService.getMyArticles(user.getId(), page, size));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        return Result.success(articleService.getMyArticles(user.getId(), page, size));
     }
 
     @PostMapping
     public Result<ArticleVO> createArticle(@Valid @RequestBody ArticleRequest request,
                                          @AuthenticationPrincipal User user) {
-        try {
-            ArticleVO article = articleService.createArticle(request, user.getId());
-            return Result.success(article);
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        ArticleVO article = articleService.createArticle(request, user.getId());
+        return Result.success(article);
     }
 
     @PutMapping("/{id}")
     public Result<ArticleVO> updateArticle(@PathVariable Long id,
                                          @Valid @RequestBody ArticleRequest request,
                                          @AuthenticationPrincipal User user) {
-        try {
-            ArticleVO article = articleService.updateArticle(id, request, user);
-            return Result.success(article);
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        ArticleVO article = articleService.updateArticle(id, request, user);
+        return Result.success(article);
     }
 
     @DeleteMapping("/{id}")
     public Result<Void> deleteArticle(@PathVariable Long id,
                                       @AuthenticationPrincipal User user) {
-        try {
-            articleService.deleteArticle(id, user);
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        articleService.deleteArticle(id, user);
+        return Result.success();
     }
 
     /** 购买付费文章，返回买家最新余额 */
     @PostMapping("/{id}/purchase")
     public Result<java.math.BigDecimal> purchaseArticle(@PathVariable Long id,
                                                         @AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            return Result.success(articleService.purchaseArticle(id, user.getId()));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        return Result.success(articleService.purchaseArticle(id, user.getId()));
     }
 
     @PostMapping("/{id}/like")
     public Result<Void> likeArticle(@PathVariable Long id, @AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            articleService.likeArticle(id, user.getId());
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        articleService.likeArticle(id, user.getId());
+        return Result.success();
     }
 }

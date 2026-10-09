@@ -24,40 +24,24 @@ public class UserController {
     public Result<Page<UserVO>> getUsers(@RequestParam(defaultValue = "1") int page,
                                        @RequestParam(defaultValue = "10") int size,
                                        @RequestParam(required = false) String keyword) {
-        try {
-            return Result.success(userService.getUsers(page, size, keyword));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        return Result.success(userService.getUsers(page, size, keyword));
     }
 
     @PutMapping("/{id}/role")
     public Result<Void> updateRole(@PathVariable Long id, @RequestBody UpdateRoleRequest request) {
-        try {
-            userService.updateRole(id, request.getRole());
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        userService.updateRole(id, request.getRole());
+        return Result.success();
     }
 
     @PutMapping("/{id}/status")
     public Result<Void> updateStatus(@PathVariable Long id, @RequestBody UpdateStatusRequest request) {
-        try {
-            userService.updateStatus(id, request.getStatus());
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        userService.updateStatus(id, request.getStatus());
+        return Result.success();
     }
 
     @PutMapping("/{id}/balance")
     public Result<Void> adjustBalance(@PathVariable Long id, @Valid @RequestBody AdjustBalanceRequest request) {
-        try {
-            userService.adjustBalance(id, request.getChange(), request.getRemark());
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        userService.adjustBalance(id, request.getChange(), request.getRemark());
+        return Result.success();
     }
 }

@@ -19,7 +19,10 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: 0
-      timeout: 10000ms
+      # 连接/命令超时都设短：Redis 不可达时快速失败，
+      # 认证链路里的缓存与限流都有降级兜底，不需要长时间等待
+      connect-timeout: 1000ms
+      timeout: 3000ms
       lettuce:
         pool:
           max-active: 8

@@ -24,14 +24,10 @@ public class RechargeController {
     /** 当前用户余额 */
     @GetMapping("/balance")
     public Result<BigDecimal> getBalance(@AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            return Result.success(rechargeService.getBalance(user.getId()));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        return Result.success(rechargeService.getBalance(user.getId()));
     }
 
     /** 资金明细（余额流水） */
@@ -39,28 +35,20 @@ public class RechargeController {
     public Result<Page<BalanceLogVO>> getBalanceLogs(@RequestParam(defaultValue = "1") int page,
                                                    @RequestParam(defaultValue = "10") int size,
                                                    @AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            return Result.success(rechargeService.getBalanceLogs(user.getId(), page, size));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        return Result.success(rechargeService.getBalanceLogs(user.getId(), page, size));
     }
 
     /** 充值（模拟支付，立即到账），返回最新余额 */
     @PostMapping
     public Result<BigDecimal> recharge(@Valid @RequestBody RechargeRequest request,
                                        @AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            return Result.success(rechargeService.recharge(user.getId(), request.getAmount()));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        return Result.success(rechargeService.recharge(user.getId(), request.getAmount()));
     }
 
     /** 我的充值记录 */
@@ -68,13 +56,9 @@ public class RechargeController {
     public Result<Page<RechargeRecordVO>> getMyRecharges(@RequestParam(defaultValue = "1") int page,
                                                        @RequestParam(defaultValue = "10") int size,
                                                        @AuthenticationPrincipal User user) {
-        try {
-            if (user == null) {
-                return Result.error("请先登录");
-            }
-            return Result.success(rechargeService.getMyRecharges(user.getId(), page, size));
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
+        if (user == null) {
+            return Result.error("请先登录");
         }
+        return Result.success(rechargeService.getMyRecharges(user.getId(), page, size));
     }
 }

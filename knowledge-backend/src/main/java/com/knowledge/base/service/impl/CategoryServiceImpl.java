@@ -1,6 +1,8 @@
 package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.knowledge.base.common.BusinessException;
+import com.knowledge.base.dto.CategoryRequest;
 import com.knowledge.base.entity.Category;
 import com.knowledge.base.mapper.CategoryMapper;
 import com.knowledge.base.service.CategoryService;
@@ -71,11 +73,17 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     @Transactional
-    public CategoryVO createCategory(Category category) {
+    public CategoryVO createCategory(CategoryRequest request) {
         // 父分类存在性校验（0 表示顶级分类，无需校验）
-        if (category.getParentId() != null && category.getParentId() != 0
-                && categoryMapper.selectById(category.getParentId()) == null) {
-            throw new RuntimeException("父分类不存在");
+        if (request.getParentId() != null && request.getParentId() != 0
+                && categoryMapper.selectById(request.getParentId()) == null) {
+            throw new BusinessException("父分类不存在");
+        }
+        Category category = new Category();
+        category.setName(request.getName());
+        category.setParentId(request.getParentId());
+        if (request.getSort() != null) {
+            category.setSort(request.getSort());
         }
         categoryMapper.insert(category);
 
@@ -93,22 +101,22 @@ public class CategoryServiceImpl implements CategoryService {
 
     @Override
     @Transactional
-    public CategoryVO updateCategory(Long id, Category category) {
+    public CategoryVO updateCategory(Long id, CategoryRequest request) {
         Category existing = categoryMapper.selectById(id);
-        if (existing == null) throw new RuntimeException("分类不存在");
+        if (existing == null) throw new BusinessException("分类不存在");
         Long oldParentId = existing.getParentId();
-        existing.setName(category.getName());
-        existing.setParentId(category.getParentId());
-        if (category.getSort() != null) {
-            existing.setSort(category.getSort());
+        existing.setName(request.getName());
+        existing.setParentId(request.getParentId());
+        if (request.getSort() != null) {
+            existing.setSort(request.getSort());
         }
         categoryMapper.updateById(existing);
 
         // 分类被移动到别的父分类下时，同样触发该父分类下文章作者的通知
-        if (category.getParentId() != null && category.getParentId() != 0
-                && !category.getParentId().equals(oldParentId)) {
+        if (request.getParentId() != null && request.getParentId() != 0
+                && !request.getParentId().equals(oldParentId)) {
             try {
-                notificationService.notifyCategoryAddedChild(category.getParentId(), existing.getName());
+                notificationService.notifyCategoryAddedChild(request.getParentId(), existing.getName());
             } catch (Exception e) {
                 // 通知失败不影响分类更新
             }

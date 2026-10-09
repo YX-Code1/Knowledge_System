@@ -20,12 +20,8 @@ public class FavoriteController {
     @PostMapping("/toggle/{articleId}")
     public Result<Void> toggleFavorite(@PathVariable Long articleId,
                                        @AuthenticationPrincipal User user) {
-        try {
-            favoriteService.toggleFavorite(articleId, user.getId());
-            return Result.success();
-        } catch (Exception e) {
-            return Result.error(e.getMessage());
-        }
+        favoriteService.toggleFavorite(articleId, user.getId());
+        return Result.success();
     }
 
     @GetMapping("/check/{articleId}")
