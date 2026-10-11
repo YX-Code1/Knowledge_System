@@ -259,9 +259,9 @@ function scrollAiToBottom() {
   })
 }
 
-// 给后端带最近几轮对话（不含刚发送的问题和 AI 空占位，后端自己截断）
+// 给后端带最近几轮对话（排除末尾的 AI 空占位和刚发送的问题本身，后端自己截断）
 function buildAiHistory() {
-  return aiMessages.value.slice(-8, -1).map(m => ({ role: m.role, content: m.content }))
+  return aiMessages.value.slice(-8, -2).map(m => ({ role: m.role, content: m.content }))
 }
 
 async function sendAi() {
