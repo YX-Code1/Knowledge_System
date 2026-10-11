@@ -2,6 +2,7 @@ package com.knowledge.base.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.knowledge.base.ai.event.ArticleContentChangedEvent;
 import com.knowledge.base.common.BusinessException;
 import com.knowledge.base.dto.ArticleRequest;
 import com.knowledge.base.entity.Article;
@@ -31,6 +32,7 @@ import com.knowledge.base.service.ArticleService;
 import com.knowledge.base.vo.ArticleVO;
 import com.knowledge.base.vo.TagVO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -55,6 +57,9 @@ public class ArticleServiceImpl implements ArticleService {
 
     @Autowired
     private ArticleTagMapper articleTagMapper;
+
+    @Autowired
+    private ApplicationEventPublisher eventPublisher;
 
     @Autowired
     private TagMapper tagMapper;
@@ -238,6 +243,9 @@ public class ArticleServiceImpl implements ArticleService {
             }
         }
 
+        // 事务提交后异步重建该文章的向量索引，失败不影响发布
+        eventPublisher.publishEvent(new ArticleContentChangedEvent(article.getId()));
+
         return ArticleVO.from(article);
     }
 
@@ -271,6 +279,9 @@ public class ArticleServiceImpl implements ArticleService {
             }
         }
 
+        // 事务提交后异步重建该文章的向量索引，失败不影响保存
+        eventPublisher.publishEvent(new ArticleContentChangedEvent(id));
+
         return ArticleVO.from(article);
     }
 
@@ -292,6 +303,9 @@ public class ArticleServiceImpl implements ArticleService {
         collectionArticleMapper.delete(new LambdaQueryWrapper<CollectionArticle>().eq(CollectionArticle::getArticleId, id));
         // 注意：ArticlePurchase / BalanceLog 属于资金流水，删除文章不删购买记录（保留审计痕迹，
         // 也不做退款——余额已结算给作者，退款需独立的对账流程，当前产品决策为不退款）
+
+        // 事务提交后异步清空该文章的向量索引，失败不影响删除
+        eventPublisher.publishEvent(new ArticleContentChangedEvent(id));
     }
 
     @Override

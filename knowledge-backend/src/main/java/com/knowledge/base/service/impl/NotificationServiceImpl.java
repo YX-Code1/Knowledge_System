@@ -88,4 +88,34 @@ public class NotificationServiceImpl implements NotificationService {
             notificationMapper.insert(notification);
         }
     }
+
+    @Override
+    public void notifyCategoryAddedChildForAuthor(Long parentCategoryId, String childCategoryName, Article article) {
+        Category parent = categoryMapper.selectById(parentCategoryId);
+        String parentName = parent != null ? parent.getName() : "原分类";
+        Notification notification = new Notification();
+        notification.setUserId(article.getAuthorId());
+        notification.setType("CATEGORY_CHANGED");
+        notification.setContent(fitContent("你的文章《" + article.getTitle() + "》所在分类「" + parentName
+                + "」新增了子分类「" + childCategoryName + "」，AI 未能自动归类，请手动将文章修改到更具体的分类"));
+        notification.setIsRead(0);
+        notificationMapper.insert(notification);
+    }
+
+    @Override
+    public void notifyAiRecategorized(Article article, String fromCategoryName, String toCategoryName, String reason) {
+        String reasonText = (reason == null || reason.isBlank()) ? "" : "原因：" + reason.trim() + "。";
+        Notification notification = new Notification();
+        notification.setUserId(article.getAuthorId());
+        notification.setType("CATEGORY_CHANGED");
+        notification.setContent(fitContent("系统已根据文章内容将《" + article.getTitle() + "》从「" + fromCategoryName
+                + "」自动调整到「" + toCategoryName + "」。" + reasonText + "如不合适可自行修改。"));
+        notification.setIsRead(0);
+        notificationMapper.insert(notification);
+    }
+
+    /** 通知内容落库前截断到字段长度（VARCHAR(500)），防止超长插入报错 */
+    private String fitContent(String content) {
+        return content.length() <= 500 ? content : content.substring(0, 500);
+    }
 }

@@ -21,7 +21,21 @@
         <java.version>17</java.version>
         <mybatis-plus.version>3.5.17</mybatis-plus.version>
         <jjwt.version>0.12.5</jjwt.version>
+        <langchain4j.version>1.20.0</langchain4j.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- LangChain4j BOM：统一 core 与各集成模块版本 -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-bom</artifactId>
+                <version>${langchain4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Spring Boot Web -->
@@ -99,6 +113,17 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <!-- AI：LangChain4j core + OpenAI 兼容集成（DeepSeek/硅基流动均走 OpenAI 协议）
+             不使用 langchain4j-spring-boot-starter：其当前版本要求 Spring Boot 3.5+，本项目 3.2.5 手动装配 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
         </dependency>
 
         <!-- Test -->

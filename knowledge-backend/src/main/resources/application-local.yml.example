@@ -16,3 +16,11 @@ spring:
 
 jwt:
   secret: 至少32位的随机密钥
+
+# AI：分别到 https://platform.deepseek.com 和 https://cloud.siliconflow.cn 注册并创建 API Key 后填入
+# DeepSeek 用于对话生成，硅基流动用于 embedding（BAAI/bge-m3，免费）
+ai:
+  deepseek:
+    api-key: 你的DeepSeek API Key（sk-开头）
+  siliconflow:
+    api-key: 你的硅基流动 API Key（sk-开头）

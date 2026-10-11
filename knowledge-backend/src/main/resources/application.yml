@@ -62,6 +62,22 @@ jwt:
   header: Authorization
   prefix: Bearer
 
+# AI 相关配置：DeepSeek 负责对话生成（OpenAI 兼容协议），硅基流动负责 embedding
+# （DeepSeek 官方无 embedding 接口）。真实 key 放在 application-local.yml（已 gitignore）
+ai:
+  deepseek:
+    api-key: ${AI_DEEPSEEK_API_KEY:}
+    base-url: ${AI_DEEPSEEK_BASE_URL:https://api.deepseek.com/v1}
+    model: ${AI_DEEPSEEK_MODEL:deepseek-v4-flash}
+    timeout-seconds: 60
+  siliconflow:
+    api-key: ${AI_SILICONFLOW_API_KEY:}
+    base-url: ${AI_SILICONFLOW_BASE_URL:https://api.siliconflow.cn/v1}
+    embedding-model: ${AI_SILICONFLOW_EMBEDDING_MODEL:BAAI/bge-m3}
+  chat:
+    # 每用户每分钟提问次数上限（控制 API 费用）
+    rate-limit-per-minute: 20
+
 logging:
   level:
     com.knowledge.base: debug

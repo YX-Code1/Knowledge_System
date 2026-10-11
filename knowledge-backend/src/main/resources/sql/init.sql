@@ -236,3 +236,14 @@ CREATE TABLE IF NOT EXISTS user_block (
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uk_user_blocked (user_id, blocked_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='私信拉黑表';
+
+-- AI 问答索引：每篇文章切成若干块，每块存 1024 维向量（硅基流动 bge-m3）
+CREATE TABLE IF NOT EXISTS ai_article_chunk (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    article_id BIGINT NOT NULL COMMENT '文章ID',
+    chunk_index INT NOT NULL COMMENT '分块序号（从0开始）',
+    content TEXT NOT NULL COMMENT '分块文本内容',
+    vector BLOB NOT NULL COMMENT '1024维float向量（已归一化，4KB）',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_article_id (article_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='AI问答索引：文章分块及其向量';

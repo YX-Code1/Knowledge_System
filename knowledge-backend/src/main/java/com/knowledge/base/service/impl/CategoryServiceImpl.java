@@ -1,14 +1,14 @@
 package com.knowledge.base.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.knowledge.base.ai.event.CategoryChildAddedEvent;
 import com.knowledge.base.common.BusinessException;
 import com.knowledge.base.dto.CategoryRequest;
 import com.knowledge.base.entity.Category;
 import com.knowledge.base.mapper.CategoryMapper;
 import com.knowledge.base.service.CategoryService;
-import com.knowledge.base.service.NotificationService;
 import com.knowledge.base.vo.CategoryVO;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,7 +24,7 @@ public class CategoryServiceImpl implements CategoryService {
     private CategoryMapper categoryMapper;
 
     @Autowired
-    private NotificationService notificationService;
+    private ApplicationEventPublisher eventPublisher;
 
     @Override
     public List<CategoryVO> getAllCategories() {
@@ -87,13 +87,13 @@ public class CategoryServiceImpl implements CategoryService {
         }
         categoryMapper.insert(category);
 
-        // 父分类下新增子分类后，通知该分类下文章的作者修改分类；
-        // 通知失败不影响分类创建
+        // 父分类下新增子分类后，事务提交后异步触发 AI 自动重分类（失败自动降级为手动提醒）；
+        // 事件发布失败不影响分类创建
         if (category.getParentId() != null && category.getParentId() != 0) {
             try {
-                notificationService.notifyCategoryAddedChild(category.getParentId(), category.getName());
+                eventPublisher.publishEvent(new CategoryChildAddedEvent(category.getParentId(), category.getName()));
             } catch (Exception e) {
-                // 通知失败不影响分类创建
+                // 事件发布失败不影响分类创建
             }
         }
         return CategoryVO.from(category);
@@ -112,13 +112,13 @@ public class CategoryServiceImpl implements CategoryService {
         }
         categoryMapper.updateById(existing);
 
-        // 分类被移动到别的父分类下时，同样触发该父分类下文章作者的通知
+        // 分类被移动到别的父分类下时，同样触发 AI 自动重分类（事务提交后异步执行）
         if (request.getParentId() != null && request.getParentId() != 0
                 && !request.getParentId().equals(oldParentId)) {
             try {
-                notificationService.notifyCategoryAddedChild(request.getParentId(), existing.getName());
+                eventPublisher.publishEvent(new CategoryChildAddedEvent(request.getParentId(), existing.getName()));
             } catch (Exception e) {
-                // 通知失败不影响分类更新
+                // 事件发布失败不影响分类更新
             }
         }
         return CategoryVO.from(existing);
