@@ -2,7 +2,10 @@ package com.knowledge.base.ai.controller;
 
 import com.knowledge.base.ai.dto.AiChatRequest;
 import com.knowledge.base.ai.dto.AiGenerateRequest;
+import com.knowledge.base.ai.dto.AiQuotaVO;
 import com.knowledge.base.ai.dto.AiSummaryVO;
+import com.knowledge.base.ai.quota.AiQuota;
+import com.knowledge.base.ai.quota.AiQuotaService;
 import com.knowledge.base.ai.service.AiSummaryService;
 import com.knowledge.base.ai.service.KnowledgeBaseService;
 import com.knowledge.base.common.BusinessException;
@@ -14,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -36,7 +40,11 @@ public class AiController {
     @Autowired
     private KnowledgeBaseService knowledgeBaseService;
 
-    /** AI 生成文章摘要（同步，前端按钮触发） */
+    @Autowired
+    private AiQuotaService aiQuotaService;
+
+    /** AI 生成文章摘要（同步，前端按钮触发）。@AiQuota：每日配额由切面原子扣减 */
+    @AiQuota
     @PostMapping("/summary")
     public Result<AiSummaryVO> generateSummary(@Valid @RequestBody AiGenerateRequest request,
                                                @AuthenticationPrincipal User user) {
@@ -46,7 +54,8 @@ public class AiController {
         return Result.success(aiSummaryService.generateSummary(request.getTitle(), request.getContent()));
     }
 
-    /** AI 从现有标签库中推荐标签（同步，前端按钮触发） */
+    /** AI 从现有标签库中推荐标签（同步，前端按钮触发）。@AiQuota：每日配额由切面原子扣减 */
+    @AiQuota
     @PostMapping("/tags")
     public Result<List<TagVO>> recommendTags(@Valid @RequestBody AiGenerateRequest request,
                                              @AuthenticationPrincipal User user) {
@@ -60,7 +69,9 @@ public class AiController {
      * RAG 流式问答（SSE）。
      * 创建 emitter 前抛出的业务异常由全局异常处理器返回 JSON，
      * 前端根据响应 Content-Type 区分 SSE 流与 JSON 错误。
+     * @AiQuota：每日配额由切面原子扣减（每分钟频控在 service 内另有 Lua 计数）
      */
+    @AiQuota
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chat(@Valid @RequestBody AiChatRequest request,
                            @AuthenticationPrincipal User user) {
@@ -70,6 +81,15 @@ public class AiController {
         SseEmitter emitter = new SseEmitter(180_000L);
         knowledgeBaseService.chat(user.getId(), request, emitter);
         return emitter;
+    }
+
+    /** 查询今日 AI 配额使用情况（已用/上限/剩余，前端展示） */
+    @GetMapping("/quota")
+    public Result<AiQuotaVO> todayQuota(@AuthenticationPrincipal User user) {
+        if (user == null) {
+            return Result.error("请先登录");
+        }
+        return Result.success(aiQuotaService.todayQuota(user.getId()));
     }
 
     /** 管理员手动重建全量向量索引（异步执行，立即返回） */

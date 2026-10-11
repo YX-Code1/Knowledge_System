@@ -5,6 +5,7 @@ import com.knowledge.base.ai.dto.AiChatRequest;
 import com.knowledge.base.ai.dto.ChunkHit;
 import com.knowledge.base.ai.event.ArticleContentChangedEvent;
 import com.knowledge.base.common.BusinessException;
+import com.knowledge.base.service.RedisLuaService;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -15,14 +16,12 @@ import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -58,7 +57,7 @@ public class KnowledgeBaseService {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private StringRedisTemplate stringRedisTemplate;
+    private RedisLuaService redisLuaService;
 
     @Value("${ai.chat.rate-limit-per-minute:20}")
     private int rateLimitPerMinute;
@@ -155,22 +154,12 @@ public class KnowledgeBaseService {
 
     /**
      * 每用户每分钟提问次数限流（控制 API 费用）。
-     * Redis 不可用时降级放行，不阻塞用户（沿用本项目缓存降级惯例）。
+     * Redis Lua 原子「自增 + 首次设置过期」；Redis 不可用时降级放行，不阻塞用户（沿用本项目缓存降级惯例）。
      */
     private void checkRateLimit(Long userId) {
-        try {
-            String key = "ai:chat:limit:" + userId;
-            Long count = stringRedisTemplate.opsForValue().increment(key);
-            if (count != null && count == 1L) {
-                stringRedisTemplate.expire(key, Duration.ofMinutes(1));
-            }
-            if (count != null && count > rateLimitPerMinute) {
-                throw new BusinessException("提问太频繁，请稍后再试");
-            }
-        } catch (BusinessException e) {
-            throw e;
-        } catch (Exception e) {
-            log.warn("AI 问答限流降级放行", e);
+        Long count = redisLuaService.increment("ai:chat:limit:" + userId, 60, false);
+        if (count != null && count > rateLimitPerMinute) {
+            throw new BusinessException("提问太频繁，请稍后再试");
         }
     }
 

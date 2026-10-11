@@ -9,6 +9,7 @@ import com.knowledge.base.entity.User;
 import com.knowledge.base.mapper.UserMapper;
 import com.knowledge.base.security.JwtUtils;
 import com.knowledge.base.service.AuthService;
+import com.knowledge.base.service.RedisLuaService;
 import com.knowledge.base.vo.LoginVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -75,6 +76,9 @@ public class AuthServiceImpl implements AuthService {
     private StringRedisTemplate stringRedisTemplate;
 
     @Autowired
+    private RedisLuaService redisLuaService;
+
+    @Autowired
     private JavaMailSender mailSender;
 
     @Value("${spring.mail.username}")
@@ -104,13 +108,9 @@ public class AuthServiceImpl implements AuthService {
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             // 只有密码错误才计数（用户不存在不计数，避免攻击者借此锁死任意账号）。
-            // Redis INCR 原子自增，并发下计数不丢；首次失败时设置过期时间
-            Long fails = redisWithFallback(0L,
-                    () -> stringRedisTemplate.opsForValue().increment(failKey));
-            if (fails != null && fails == 1) {
-                redisWithFallback(null,
-                        () -> stringRedisTemplate.expire(failKey, LOGIN_FAIL_EXPIRE_MINUTES, TimeUnit.MINUTES));
-            }
+            // Redis Lua 原子「自增 + 首次设置过期」：替代 INCR 后判断首次再 EXPIRE 的两步写法
+            // （两步之间有竞态窗口，且 EXPIRE 失败会导致计数永不过期、用户被永久锁死）
+            redisLuaService.increment(failKey, LOGIN_FAIL_EXPIRE_MINUTES * 60, false);
             throw new BusinessException("用户名或密码错误");
         }
 
@@ -230,10 +230,8 @@ public class AuthServiceImpl implements AuthService {
 
         if (!savedCode.equals(code)) {
             // 计数与验证码剩余有效期对齐（每次失败后重新续期，最坏情况略长于验证码有效期，可接受）
-            redisWithFallback(null,
-                    () -> stringRedisTemplate.opsForValue().increment(tryKey));
-            redisWithFallback(null,
-                    () -> stringRedisTemplate.expire(tryKey, CODE_EXPIRE_MINUTES, TimeUnit.MINUTES));
+            // Redis Lua 原子「自增 + 续期」
+            redisLuaService.increment(tryKey, CODE_EXPIRE_MINUTES * 60, true);
             throw new BusinessException("验证码错误");
         }
 
@@ -259,16 +257,11 @@ public class AuthServiceImpl implements AuthService {
      * 两层防护：按 IP 限流（防轰炸任意邮箱）+ 按邮箱冷却（防轰炸同一邮箱）。
      */
     private void sendEmailCode(String codeKey, String cooldownKey, String email, String purpose, String ip) {
-        // 按 IP 限流：先原子自增再判断，避免 check-then-act 竞态；
+        // 按 IP 限流：Redis Lua 原子自增，避免 check-then-act 竞态；
         // 超限的这一次请求也会计入计数（多算一次），影响可忽略。
         // Redis 不可用时 fail-open：跳过限流，允许发送（限流是加固手段）
         String ipKey = CODE_IP_KEY_PREFIX + ip;
-        Long ipCount = redisWithFallback(1L,
-                () -> stringRedisTemplate.opsForValue().increment(ipKey));
-        if (ipCount != null && ipCount == 1) {
-            redisWithFallback(null,
-                    () -> stringRedisTemplate.expire(ipKey, CODE_IP_EXPIRE_MINUTES, TimeUnit.MINUTES));
-        }
+        Long ipCount = redisLuaService.increment(ipKey, CODE_IP_EXPIRE_MINUTES * 60, false);
         if (ipCount != null && ipCount > CODE_IP_MAX) {
             throw new BusinessException("发送验证码过于频繁，请稍后再试");
         }

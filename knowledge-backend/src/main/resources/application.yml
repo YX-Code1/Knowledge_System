@@ -75,8 +75,11 @@ ai:
     base-url: ${AI_SILICONFLOW_BASE_URL:https://api.siliconflow.cn/v1}
     embedding-model: ${AI_SILICONFLOW_EMBEDDING_MODEL:BAAI/bge-m3}
   chat:
-    # 每用户每分钟提问次数上限（控制 API 费用）
+    # 每用户每分钟提问次数上限（控制 API 费用，Redis Lua 原子计数）
     rate-limit-per-minute: 20
+  quota:
+    # 每用户每日 AI 调用次数上限（摘要/标签/问答各消耗 1 次，Redis Lua 原子扣减；Redis 不可用时降级放行）
+    daily-limit: 30
 
 logging:
   level:
