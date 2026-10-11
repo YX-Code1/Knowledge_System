@@ -13,7 +13,10 @@
             <el-input v-model="form.title" placeholder="请输入文章标题" maxlength="200" show-word-limit />
           </el-form-item>
           <el-form-item label="摘要">
-            <el-input v-model="form.summary" type="textarea" :rows="2" placeholder="请输入文章摘要（选填）" maxlength="500" show-word-limit />
+            <div style="width: 100%">
+              <el-input v-model="form.summary" type="textarea" :rows="2" placeholder="请输入文章摘要（选填）" maxlength="500" show-word-limit />
+              <el-button size="small" style="margin-top: 8px" :loading="summaryLoading" @click="handleGenerateSummary">AI 生成摘要</el-button>
+            </div>
           </el-form-item>
           <el-form-item label="分类" prop="categoryId">
             <el-select v-model="form.categoryId" placeholder="请选择分类" style="width: 100%">
@@ -28,9 +31,12 @@
             </el-select>
           </el-form-item>
           <el-form-item label="标签">
-            <el-select v-model="form.tagIds" multiple placeholder="请选择标签" style="width: 100%">
-              <el-option v-for="tag in tags" :key="tag.id" :label="tag.name" :value="tag.id" />
-            </el-select>
+            <div style="width: 100%">
+              <el-select v-model="form.tagIds" multiple placeholder="请选择标签" style="width: 100%">
+                <el-option v-for="tag in tags" :key="tag.id" :label="tag.name" :value="tag.id" />
+              </el-select>
+              <el-button size="small" style="margin-top: 8px" :loading="tagsLoading" @click="handleRecommendTags">AI 推荐标签</el-button>
+            </div>
           </el-form-item>
           <el-form-item label="售价">
             <el-input-number v-model="form.price" :min="0" :max="10000" :precision="2" :step="1" style="width: 100%" />
@@ -51,12 +57,14 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { createArticle, getCategories, getTags } from '@/api'
+import { createArticle, getCategories, getTags, generateSummary, recommendTags } from '@/api'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const formRef = ref()
 const loading = ref(false)
+const summaryLoading = ref(false)
+const tagsLoading = ref(false)
 const categories = ref([])
 const tags = ref([])
 
@@ -91,6 +99,47 @@ async function handleSubmit() {
     router.push(`/article/${res.data.id}`)
   } finally {
     loading.value = false
+  }
+}
+
+// 校验标题和内容已填写，否则 AI 调用没有意义
+function ensureTitleContent() {
+  if (!form.title.trim() || !form.content.trim()) {
+    ElMessage.warning('请先填写标题和内容')
+    return false
+  }
+  return true
+}
+
+async function handleGenerateSummary() {
+  if (!ensureTitleContent()) return
+  summaryLoading.value = true
+  try {
+    const res = await generateSummary({ title: form.title, content: form.content })
+    form.summary = res.data.summary
+    ElMessage.success('摘要已生成')
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    summaryLoading.value = false
+  }
+}
+
+async function handleRecommendTags() {
+  if (!ensureTitleContent()) return
+  tagsLoading.value = true
+  try {
+    const res = await recommendTags({ title: form.title, content: form.content })
+    if (!res.data.length) {
+      ElMessage.warning('没有匹配的标签，请手动选择')
+      return
+    }
+    form.tagIds = res.data.map(t => t.id)
+    ElMessage.success('已推荐标签')
+  } catch (e) {
+    // 拦截器已提示
+  } finally {
+    tagsLoading.value = false
   }
 }
 

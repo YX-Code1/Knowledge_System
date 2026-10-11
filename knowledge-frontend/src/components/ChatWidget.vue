@@ -17,8 +17,20 @@
         </div>
       </div>
 
-      <!-- 联系人列表 -->
-      <div v-if="activePeerId === null" v-loading="loading" class="chat-contacts">
+      <!-- 联系人列表：AI 助手固定置顶（无论是否有历史会话），下面才是私信会话 -->
+      <div v-if="!aiChatActive && activePeerId === null" v-loading="loading" class="chat-contacts">
+        <div class="chat-ai-entry" @click="openAiChat">
+          <div class="chat-ai-avatar">
+            <el-icon :size="20"><MagicStick /></el-icon>
+          </div>
+          <div class="chat-contact-body">
+            <div class="chat-contact-top">
+              <span class="chat-contact-name">AI 助手</span>
+            </div>
+            <span class="chat-contact-preview">基于知识库文章的智能问答</span>
+          </div>
+        </div>
+        <div class="chat-contacts-divider">私信会话</div>
         <div v-for="c in conversations" :key="c.peerId" class="chat-contact" @click="openConversation(c)">
           <el-badge :value="c.unreadCount" :hidden="!c.unreadCount" :max="99">
             <el-avatar :size="36" :src="c.peerAvatar" icon="UserFilled" />
@@ -34,7 +46,41 @@
         <el-empty v-if="!loading && conversations.length === 0" description="暂无会话" :image-size="50" />
       </div>
 
-      <!-- 会话视图 -->
+      <!-- AI 问答视图 -->
+      <div v-else-if="aiChatActive" class="chat-conversation">
+        <div class="chat-conv-header">
+          <el-button text size="small" icon="ArrowLeft" @click="backToList">返回</el-button>
+          <span class="chat-conv-title">AI 助手</span>
+          <span style="width: 48px"></span>
+        </div>
+        <div class="chat-messages" ref="aiMsgListRef">
+          <div v-if="aiMessages.length === 0" class="ai-welcome">
+            <p>👋 我是知识库 AI 助手</p>
+            <p>我会检索知识库文章来回答你的问题</p>
+          </div>
+          <div v-for="(m, i) in aiMessages" :key="i" class="chat-msg" :class="{ mine: m.role === 'user' }">
+            <div class="chat-bubble" :class="{ 'ai-markdown': m.role === 'assistant' }">
+              <div v-if="m.role === 'assistant'" v-html="renderMarkdown(m.content)"></div>
+              <template v-else>{{ m.content }}</template>
+            </div>
+          </div>
+        </div>
+        <div class="chat-input">
+          <el-input
+            v-model="aiQuestion"
+            type="textarea"
+            :rows="2"
+            maxlength="500"
+            placeholder="向知识库提问..."
+            :disabled="aiSending"
+            @keydown.enter.exact.prevent="sendAi"
+          />
+          <el-button v-if="!aiSending" type="primary" size="small" @click="sendAi">发送</el-button>
+          <el-button v-else type="danger" size="small" @click="stopAi">停止</el-button>
+        </div>
+      </div>
+
+      <!-- 私信会话视图 -->
       <div v-else class="chat-conversation">
         <div class="chat-conv-header">
           <el-button text size="small" icon="ArrowLeft" @click="backToList">返回</el-button>
@@ -70,6 +116,7 @@ import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { getConversations, getConversationMessages, sendMessage, blockUser, unblockUser } from '@/api'
 import { useUserStore } from '@/store/user'
+import { renderMarkdown } from '@/utils/markdown'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const props = defineProps({
@@ -94,6 +141,14 @@ const sending = ref(false)
 const msgListRef = ref()
 let refreshTimer = null
 
+// AI 问答状态（会话记录仅存组件内存，刷新即清空——入口永远置顶不受影响）
+const aiChatActive = ref(false)
+const aiMessages = ref([])
+const aiQuestion = ref('')
+const aiSending = ref(false)
+const aiMsgListRef = ref()
+let aiAbortController = null
+
 function formatTime(date) {
   if (!date) return ''
   return date.substring(0, 16)
@@ -116,7 +171,13 @@ async function loadConversations() {
   }
 }
 
+function openAiChat() {
+  aiChatActive.value = true
+  activePeerId.value = null
+}
+
 async function openConversation(c) {
+  aiChatActive.value = false
   activePeerId.value = c.peerId
   activePeerNickname.value = c.peerNickname
   activeBlocked.value = c.blocked === 1
@@ -134,6 +195,8 @@ async function openConversation(c) {
 }
 
 function backToList() {
+  stopAi()
+  aiChatActive.value = false
   activePeerId.value = null
   messages.value = []
   loadConversations()
@@ -188,17 +251,115 @@ function scrollToBottom() {
   })
 }
 
-// 面板展开期间每 30 秒刷新会话列表（未读数/预览）
+function scrollAiToBottom() {
+  nextTick(() => {
+    if (aiMsgListRef.value) {
+      aiMsgListRef.value.scrollTop = aiMsgListRef.value.scrollHeight
+    }
+  })
+}
+
+// 给后端带最近几轮对话（不含刚发送的问题和 AI 空占位，后端自己截断）
+function buildAiHistory() {
+  return aiMessages.value.slice(-8, -1).map(m => ({ role: m.role, content: m.content }))
+}
+
+async function sendAi() {
+  const q = aiQuestion.value.trim()
+  if (!q || aiSending.value) return
+  aiQuestion.value = ''
+  aiMessages.value.push({ role: 'user', content: q })
+  const aiMsg = { role: 'assistant', content: '' }
+  aiMessages.value.push(aiMsg)
+  aiSending.value = true
+  scrollAiToBottom()
+
+  aiAbortController = new AbortController()
+  try {
+    // EventSource 不支持 POST/自定义请求头，这里用 fetch + ReadableStream 手动解析 SSE
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${sessionStorage.getItem('token')}`
+      },
+      body: JSON.stringify({ question: q, history: buildAiHistory() }),
+      signal: aiAbortController.signal
+    })
+    // 非 SSE 响应说明后端返回了 JSON 业务错误（如限流、索引未建立）
+    const contentType = res.headers.get('content-type') || ''
+    if (!res.ok || !contentType.includes('text/event-stream')) {
+      aiMessages.value.pop()
+      const errData = await res.json().catch(() => null)
+      ElMessage.error(errData?.message || '请求失败')
+      return
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      // SSE 事件以空行分隔，data 行是 JSON 字符串
+      const events = buffer.split('\n\n')
+      buffer = events.pop()
+      for (const event of events) {
+        for (const line of event.split('\n')) {
+          if (!line.startsWith('data:')) continue
+          let payload
+          try {
+            payload = JSON.parse(line.slice(5).trim())
+          } catch (e) {
+            continue
+          }
+          if (payload.type === 'token') {
+            aiMsg.content += payload.content
+            scrollAiToBottom()
+          } else if (payload.type === 'error') {
+            if (!aiMsg.content) aiMessages.value.pop()
+            ElMessage.error(payload.message || 'AI 服务调用失败')
+          }
+        }
+      }
+    }
+    if (!aiMsg.content) {
+      aiMessages.value.pop()
+      ElMessage.warning('AI 未返回内容，请重试')
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      // 用户主动停止，保留已生成的部分
+    } else {
+      aiMessages.value.pop()
+      ElMessage.error('网络异常，请稍后重试')
+    }
+  } finally {
+    aiSending.value = false
+    aiAbortController = null
+    scrollAiToBottom()
+  }
+}
+
+function stopAi() {
+  if (aiAbortController) aiAbortController.abort()
+}
+
+// 面板展开期间每 30 秒刷新会话列表（未读数/预览）；收起时中断进行中的 AI 流
 watch(expanded, (val) => {
   if (val) {
     refreshTimer = setInterval(loadConversations, 30000)
-  } else if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
+  } else {
+    stopAi()
+    if (refreshTimer) {
+      clearInterval(refreshTimer)
+      refreshTimer = null
+    }
   }
 })
 
 onUnmounted(() => {
+  stopAi()
   if (refreshTimer) {
     clearInterval(refreshTimer)
     refreshTimer = null
@@ -251,6 +412,36 @@ onUnmounted(() => {
 .chat-contacts {
   flex: 1;
   overflow-y: auto;
+}
+/* AI 助手：固定置顶入口，与私信会话视觉区分 */
+.chat-ai-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid #f0f0f0;
+  background: linear-gradient(135deg, #ecf5ff, #f7fbff);
+}
+.chat-ai-entry:hover {
+  background: #e6f1ff;
+}
+.chat-ai-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #409eff;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.chat-contacts-divider {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: #c0c4cc;
+  background: #fafafa;
 }
 .chat-contact {
   display: flex;
@@ -334,6 +525,49 @@ onUnmounted(() => {
 .chat-msg.mine .chat-bubble {
   background: #409eff;
   color: #fff;
+}
+.ai-welcome {
+  text-align: center;
+  color: #909399;
+  padding-top: 60px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+/* AI 回答的 markdown 紧凑样式（小面板适配） */
+.ai-markdown {
+  word-break: break-word;
+}
+.ai-markdown :deep(p) {
+  margin: 4px 0;
+}
+.ai-markdown :deep(h1),
+.ai-markdown :deep(h2),
+.ai-markdown :deep(h3) {
+  margin: 6px 0 3px;
+  font-size: 14px;
+}
+.ai-markdown :deep(pre) {
+  background: #282c34;
+  color: #abb2bf;
+  padding: 8px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.ai-markdown :deep(code) {
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+}
+.ai-markdown :deep(ul),
+.ai-markdown :deep(ol) {
+  padding-left: 16px;
+  margin: 4px 0;
+}
+.ai-markdown :deep(blockquote) {
+  border-left: 3px solid #dcdfe6;
+  margin: 4px 0;
+  padding-left: 8px;
+  color: #909399;
 }
 .chat-input {
   display: flex;

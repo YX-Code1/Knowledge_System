@@ -111,8 +111,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getArticle, likeArticle, toggleFavorite, checkFavorite, getComments, createComment, deleteComment as deleteCommentApi, deleteArticle, getCategories, sendMessage, getConversationMessages, purchaseArticle } from '@/api'
 import { useUserStore } from '@/store/user'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
+import { renderMarkdown } from '@/utils/markdown'
 
 const route = useRoute()
 const router = useRouter()
@@ -139,12 +138,8 @@ const categoryName = computed(() => {
   return cat ? cat.name : '未分类'
 })
 
-const renderedContent = computed(() => {
-  if (!article.value.content) return ''
-  // marked 只负责 Markdown→HTML；v-html 渲染前必须经 DOMPurify 消毒，
-  // 防止存储型 XSS（marked 5.x 起已移除内置 sanitize 选项）
-  return DOMPurify.sanitize(marked.parse(article.value.content))
-})
+// marked + DOMPurify 的消毒渲染逻辑抽到 utils/markdown.js，与 AI 问答页共用
+const renderedContent = computed(() => renderMarkdown(article.value.content))
 
 const isAuthor = computed(() => userStore.userInfo?.userId === article.value.authorId)
 

@@ -79,3 +79,7 @@ export const deleteCollection = (id) => request.delete(`/collections/${id}`)
 export const addCollectionArticle = (id, data) => request.post(`/collections/${id}/articles`, data)
 export const removeCollectionArticle = (id, articleId) => request.delete(`/collections/${id}/articles/${articleId}`)
 export const purchaseCollection = (id) => request.post(`/collections/${id}/purchase`)
+
+// AI 能力（模型调用耗时较长，覆盖 request.js 的默认 10s 超时）
+export const generateSummary = (data) => request.post('/ai/summary', data, { timeout: 60000 })
+export const recommendTags = (data) => request.post('/ai/tags', data, { timeout: 60000 })
