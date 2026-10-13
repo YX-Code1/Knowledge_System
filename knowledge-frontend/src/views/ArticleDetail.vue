@@ -11,8 +11,9 @@
             {{ favorited ? '已收藏' : '收藏' }}
           </el-button>
           <el-button v-if="userStore.isLoggedIn && !isAuthor" @click="openMessageDialog" icon="Message">私信作者</el-button>
-          <el-button v-if="isAuthor" type="primary" @click="$router.push(`/article/edit/${articleId}`)" icon="Edit">编辑</el-button>
-          <el-button v-if="isAuthor" type="danger" @click="handleDelete" icon="Delete">删除</el-button>
+          <!-- 作者或管理员均可编辑/删除（与后端 checkAuthorOrAdmin 权限一致） -->
+          <el-button v-if="canManage" type="primary" @click="$router.push(`/article/edit/${articleId}`)" icon="Edit">编辑</el-button>
+          <el-button v-if="canManage" type="danger" @click="handleDelete" icon="Delete">删除</el-button>
         </div>
       </div>
     </div>
@@ -142,6 +143,8 @@ const categoryName = computed(() => {
 const renderedContent = computed(() => renderMarkdown(article.value.content))
 
 const isAuthor = computed(() => userStore.userInfo?.userId === article.value.authorId)
+// 作者或管理员都可管理文章（编辑/删除），与后端 checkAuthorOrAdmin 保持一致
+const canManage = computed(() => isAuthor.value || userStore.isAdmin)
 
 function formatDate(date) {
   if (!date) return ''

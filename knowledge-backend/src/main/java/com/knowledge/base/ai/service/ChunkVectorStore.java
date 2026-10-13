@@ -13,6 +13,7 @@ import dev.langchain4j.model.output.Response;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.nio.ByteBuffer;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 /**
@@ -56,6 +58,10 @@ public class ChunkVectorStore {
     @Autowired
     private ArticleMapper articleMapper;
 
+    @Autowired
+    @Qualifier("aiExecutor")
+    private Executor aiExecutor;
+
     /** 应用启动时把已建索引加载进内存，重启无需重建 */
     @PostConstruct
     public void loadFromDb() {
@@ -68,6 +74,23 @@ public class ChunkVectorStore {
         } catch (Exception e) {
             // 索引表不存在（未执行迁移）等情况：不阻塞应用启动，稍后通过重建索引接口恢复
             log.error("AI 向量索引加载失败，可稍后通过重建索引接口恢复", e);
+        }
+
+        // 自愈：索引为空但存在已发布文章（老库升级首次启用 AI 功能）时，异步全量重建，
+        // 避免用户提问时看到“索引尚未建立，请联系管理员”却没有可操作入口
+        if (vectorCache.isEmpty()) {
+            Long published = articleMapper.selectCount(
+                    new LambdaQueryWrapper<Article>().eq(Article::getStatus, 1));
+            if (published != null && published > 0) {
+                log.info("向量索引为空且存在 {} 篇已发布文章，启动自动全量重建", published);
+                aiExecutor.execute(() -> {
+                    try {
+                        rebuildAll();
+                    } catch (Exception e) {
+                        log.error("启动自动重建向量索引失败", e);
+                    }
+                });
+            }
         }
     }
 
@@ -103,13 +126,27 @@ public class ChunkVectorStore {
                 new LambdaQueryWrapper<Article>().eq(Article::getStatus, 1));
         chunkMapper.clearAll();
         vectorCache.clear();
+        int failed = 0;
         for (int i = 0; i < articles.size(); i++) {
-            rebuildArticle(articles.get(i).getId());
+            try {
+                rebuildArticle(articles.get(i).getId());
+            } catch (Exception e) {
+                // 单篇失败不拖垮全量重建（如 embedding 限流、个别内容异常），记录后继续
+                failed++;
+                log.error("文章 {} 索引重建失败，已跳过（第 {}/{} 篇）", articles.get(i).getId(), i + 1, articles.size(), e);
+            }
             if ((i + 1) % 50 == 0) {
                 log.info("AI 索引重建进度：{}/{}", i + 1, articles.size());
             }
+            // 篇间轻微间隔，避免短时间密集调用 embedding 触发提供方限流
+            try {
+                Thread.sleep(300);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
-        log.info("AI 索引重建完成，共 {} 篇文章", articles.size());
+        log.info("AI 索引重建完成，共 {} 篇文章，成功 {} 篇，失败 {} 篇", articles.size(), articles.size() - failed, failed);
     }
 
     /**
@@ -135,17 +172,25 @@ public class ChunkVectorStore {
             }
         }
 
-        List<Long> ids = heap.stream().map(Map.Entry::getKey).toList();
+        // 堆内顺序与分数无关，按相似度降序排列，保证推荐卡片的顺序稳定
+        List<Long> ids = heap.stream()
+                .sorted((a, b) -> Float.compare(b.getValue(), a.getValue()))
+                .map(Map.Entry::getKey)
+                .toList();
         List<AiArticleChunk> chunks = chunkMapper.selectBatchIds(ids);
         Set<Long> articleIds = chunks.stream().map(AiArticleChunk::getArticleId).collect(Collectors.toSet());
         Map<Long, String> titleMap = articleMapper.selectBatchIds(articleIds).stream()
                 .collect(Collectors.toMap(Article::getId, Article::getTitle, (a, b) -> a));
+        Map<Long, String> summaryMap = articleMapper.selectBatchIds(articleIds).stream()
+                .collect(Collectors.toMap(Article::getId, Article::getSummary, (a, b) -> a));
 
         List<ChunkHit> hits = new ArrayList<>();
         for (AiArticleChunk c : chunks) {
             ChunkHit hit = new ChunkHit();
             hit.setArticleId(c.getArticleId());
             hit.setArticleTitle(titleMap.getOrDefault(c.getArticleId(), "未知文章"));
+            String summary = summaryMap.get(c.getArticleId());
+            hit.setArticleSummary(summary == null ? "" : summary);
             hit.setChunkIndex(c.getChunkIndex());
             hit.setContent(c.getContent());
             hits.add(hit);

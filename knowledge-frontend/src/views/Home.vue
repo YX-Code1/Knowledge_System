@@ -153,9 +153,6 @@
         </div>
       </div>
     </div>
-
-    <!-- 右下角微信式聊天小窗（登录可见） -->
-    <ChatWidget :unread-total="unreadTotal" />
   </div>
 </template>
 
@@ -165,7 +162,6 @@ import { getArticles, getCategories, getTags, getNotificationUnreadCount, getMes
 import { useUserStore } from '@/store/user'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import ChatWidget from '@/components/ChatWidget.vue'
 
 const router = useRouter()
 const userStore = useUserStore()

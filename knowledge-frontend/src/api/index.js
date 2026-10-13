@@ -83,3 +83,5 @@ export const purchaseCollection = (id) => request.post(`/collections/${id}/purch
 // AI 能力（模型调用耗时较长，覆盖 request.js 的默认 10s 超时）
 export const generateSummary = (data) => request.post('/ai/summary', data, { timeout: 60000 })
 export const recommendTags = (data) => request.post('/ai/tags', data, { timeout: 60000 })
+/** 管理员重建全量向量索引（后端异步执行，接口立即返回） */
+export const rebuildAiIndex = () => request.post('/ai/rebuild-index')

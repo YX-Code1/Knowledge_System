@@ -79,7 +79,7 @@ public class AiController {
             throw new BusinessException("请先登录");
         }
         SseEmitter emitter = new SseEmitter(180_000L);
-        knowledgeBaseService.chat(user.getId(), request, emitter);
+        knowledgeBaseService.chatAsync(user.getId(), request, emitter);
         return emitter;
     }
 

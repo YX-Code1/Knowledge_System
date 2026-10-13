@@ -37,10 +37,27 @@ public class AiConfig {
     @Bean("aiExecutor")
     public Executor aiExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(1);
-        executor.setMaxPoolSize(1);
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(8);
         executor.setQueueCapacity(100);
         executor.setThreadNamePrefix("ai-task-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.initialize();
+        return executor;
+    }
+
+    /**
+     * 聊天专用线程池：与 aiExecutor 隔离，避免全量重建索引长时间占用
+     * aiExecutor 时把问答请求堵在队列里。任务主体（检索+装配流式调用）很快返回，
+     * token 推送由 LangChain4j 内部线程完成，单线程足够。
+     */
+    @Bean("aiChatExecutor")
+    public Executor aiChatExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(8);
+        executor.setQueueCapacity(20);
+        executor.setThreadNamePrefix("ai-chat-");
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.initialize();
         return executor;

@@ -23,6 +23,7 @@ import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -31,6 +32,7 @@ import java.util.stream.Collectors;
  * RAG 知识库问答：检索 → 组装提示词 → 流式生成。
  * <p>
  * SSE 事件协议：每条 data 是一个 JSON 对象，
+ * {"type":"status","message":"..."} 阶段提示 / {"type":"articles","data":[...]} 检索候选文章（前端作推荐卡片对照表）/
  * {"type":"token","content":"..."} 流式片段 / {"type":"error","message":"..."} 出错 /
  * {"type":"done"} 结束（正常结束时直接 complete，done 事件作为冗余保险）。
  */
@@ -81,55 +83,100 @@ public class KnowledgeBaseService {
 
     /**
      * RAG 流式问答：限流 → 检索 → 组装提示词 → 流式推送 SSE。
+     * 异步执行（aiChatExecutor）：控制器立即返回 emitter 建立 SSE 连接，
+     * 各阶段通过 status 事件向前端反馈进度，任何异常都以 error 事件快速返回，
+     * 不会出现"连接建立后无声无息"的等待。
      */
-    public void chat(Long userId, AiChatRequest request, SseEmitter emitter) {
-        checkRateLimit(userId);
-        List<ChunkHit> hits = chunkVectorStore.search(request.getQuestion(), TOP_K);
-        if (hits.isEmpty()) {
-            sendEvent(emitter, Map.of("type", "token",
-                    "content", "知识库中暂未收录相关资料，去首页看看其他文章吧。"));
+    @Async("aiChatExecutor")
+    public void chatAsync(Long userId, AiChatRequest request, SseEmitter emitter) {
+        log.info("AI 问答开始 userId={} question={}", userId, request.getQuestion());
+        try {
+            checkRateLimit(userId);
+            sendEvent(emitter, Map.of("type", "status", "message", "正在检索知识库…"));
+            List<ChunkHit> hits = chunkVectorStore.search(request.getQuestion(), TOP_K);
+            if (hits.isEmpty()) {
+                sendEvent(emitter, Map.of("type", "token",
+                        "content", "知识库中暂未收录相关资料，去首页看看其他文章吧。"));
+                emitter.complete();
+                return;
+            }
+
+            // 把检索命中的候选文章推给前端（按相似度降序，同一文章去重）。
+            // 前端不直接展示，而是等 AI 在回答末尾输出推荐 JSON 后，按 articleId 对照出要展示的推荐卡片
+            List<Map<String, Object>> articleCards = hits.stream()
+                    .collect(Collectors.toMap(ChunkHit::getArticleId, h -> h, (a, b) -> a, LinkedHashMap::new))
+                    .values().stream()
+                    .map(h -> {
+                        Map<String, Object> card = new LinkedHashMap<>();
+                        card.put("articleId", h.getArticleId());
+                        card.put("title", h.getArticleTitle());
+                        card.put("summary", h.getArticleSummary() == null ? "" : h.getArticleSummary());
+                        return card;
+                    })
+                    .toList();
+            sendEvent(emitter, Map.of("type", "articles", "data", articleCards));
+            sendEvent(emitter, Map.of("type", "status", "message", "正在生成回答…"));
+
+            String context = hits.stream()
+                    .map(h -> {
+                        String summary = h.getArticleSummary() == null || h.getArticleSummary().isEmpty()
+                                ? "无" : h.getArticleSummary();
+                        return "【文章ID：" + h.getArticleId() + "】《" + h.getArticleTitle() + "》\n"
+                                + "摘要：" + summary + "\n内容：\n" + h.getContent();
+                    })
+                    .collect(Collectors.joining("\n\n"));
+            SystemMessage system = SystemMessage.from("""
+                    你是知识库的 AI 助手。下面是知识库检索到的资料（每篇标注了文章ID、标题、摘要和内容），供你参考回答用户问题。
+
+                    严格要求：
+                    1. 必须用自己的话组织答案，严禁照抄、复制或大段引用资料的原文；
+                    2. 资料不足时，明确回答"知识库中没有找到相关资料"，不要编造；
+                    3. 回答使用 Markdown 格式；
+                    4. 当用户的问题适合推荐具体文章时（如"推荐几篇""有哪些文章"）：
+                       - 对每篇推荐文章，只用 1-2 句话介绍（标题 + 内容要点），不得输出文章原文；
+                       - 在回答的最后一行严格输出以下 JSON 格式的推荐列表（articleId 必须取自资料中的【文章ID】，最多 3 篇；不推荐时输出空数组）：
+                    ```json
+                    {"recommend":[{"articleId":1},{"articleId":2}]}
+                    ```
+
+                    资料：
+                    %s
+                    """.formatted(context));
+
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(system);
+            messages.addAll(buildHistory(request));
+            messages.add(UserMessage.from(request.getQuestion()));
+
+            streamingChatModel.chat(messages, new StreamingChatResponseHandler() {
+                @Override
+                public void onPartialResponse(String partialResponse) {
+                    sendEvent(emitter, Map.of("type", "token", "content", partialResponse));
+                }
+
+                @Override
+                public void onCompleteResponse(ChatResponse response) {
+                    log.info("AI 问答完成 userId={}", userId);
+                    sendEvent(emitter, Map.of("type", "done"));
+                    emitter.complete();
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                    log.error("AI 流式问答失败 userId={}", userId, error);
+                    sendEvent(emitter, Map.of("type", "error", "message", "AI 服务调用失败，请稍后重试"));
+                    emitter.complete();
+                }
+            });
+        } catch (BusinessException e) {
+            // 限流、索引未建立等业务错误：转成 SSE 错误事件，前端同样弹提示
+            sendEvent(emitter, Map.of("type", "error", "message", e.getMessage()));
             emitter.complete();
-            return;
+        } catch (Exception e) {
+            log.error("AI 问答异常 userId={}", userId, e);
+            sendEvent(emitter, Map.of("type", "error", "message", "AI 服务调用失败，请稍后重试"));
+            emitter.complete();
         }
-
-        String context = hits.stream()
-                .map(h -> "【文章：《" + h.getArticleTitle() + "》】\n" + h.getContent())
-                .collect(Collectors.joining("\n\n"));
-        SystemMessage system = SystemMessage.from("""
-                你是知识库的 AI 助手，请严格基于下面提供的资料回答用户问题。
-                要求：
-                1. 资料足以回答时，直接给出清晰、结构化的答案，并在结尾用「参考：《文章标题》」的形式标注引用的文章；
-                2. 资料不足时，明确回答"知识库中没有找到相关资料"，不要编造；
-                3. 回答使用 Markdown 格式。
-
-                资料：
-                %s
-                """.formatted(context));
-
-        List<ChatMessage> messages = new ArrayList<>();
-        messages.add(system);
-        messages.addAll(buildHistory(request));
-        messages.add(UserMessage.from(request.getQuestion()));
-
-        streamingChatModel.chat(messages, new StreamingChatResponseHandler() {
-            @Override
-            public void onPartialResponse(String partialResponse) {
-                sendEvent(emitter, Map.of("type", "token", "content", partialResponse));
-            }
-
-            @Override
-            public void onCompleteResponse(ChatResponse response) {
-                sendEvent(emitter, Map.of("type", "done"));
-                emitter.complete();
-            }
-
-            @Override
-            public void onError(Throwable error) {
-                log.error("AI 流式问答失败", error);
-                sendEvent(emitter, Map.of("type", "error", "message", "AI 服务调用失败，请稍后重试"));
-                emitter.complete();
-            }
-        });
     }
 
     /** 前端历史转 ChatMessage：role 不是 assistant 的一律按 user 处理，内容截断防超长 */

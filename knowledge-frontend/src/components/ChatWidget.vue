@@ -12,6 +12,7 @@
       <div class="chat-panel-header">
         <span class="chat-panel-title">消息</span>
         <div class="chat-panel-actions">
+          <el-button v-if="userStore.isAdmin" text size="small" @click="rebuildIndex">重建索引</el-button>
           <el-button text size="small" @click="goMessageCenter">消息中心</el-button>
           <el-button text size="small" @click="expanded = false">收起</el-button>
         </div>
@@ -59,10 +60,27 @@
             <p>我会检索知识库文章来回答你的问题</p>
           </div>
           <div v-for="(m, i) in aiMessages" :key="i" class="chat-msg" :class="{ mine: m.role === 'user' }">
-            <div class="chat-bubble" :class="{ 'ai-markdown': m.role === 'assistant' }">
-              <div v-if="m.role === 'assistant'" v-html="renderMarkdown(m.content)"></div>
-              <template v-else>{{ m.content }}</template>
+            <div v-if="m.role === 'assistant'" class="chat-msg-col">
+              <div class="chat-bubble ai-markdown">
+                <!-- AI 生成中且尚无内容：显示打字等待动画 + 阶段提示 -->
+                <div v-if="m.content === ''" class="typing-wrap">
+                  <div class="typing-dots">
+                    <span></span><span></span><span></span>
+                  </div>
+                  <div v-if="m.status" class="typing-status">{{ m.status }}</div>
+                </div>
+                <div v-else v-html="renderMarkdown(m.content)"></div>
+              </div>
+              <!-- 推荐阅读卡片：只展示 AI 实际推荐的文章，点击跳转文章页 -->
+              <div v-if="m.articles && m.articles.length" class="ai-article-cards">
+                <div class="ai-cards-title">推荐阅读</div>
+                <div v-for="a in m.articles" :key="a.articleId" class="ai-article-card" @click="openArticle(a.articleId)">
+                  <div class="ai-card-title">{{ a.title }}</div>
+                  <div class="ai-card-summary">{{ a.summary || '暂无摘要' }}</div>
+                </div>
+              </div>
             </div>
+            <div v-else class="chat-bubble">{{ m.content }}</div>
           </div>
         </div>
         <div class="chat-input">
@@ -112,21 +130,30 @@
 </template>
 
 <script setup>
-import { ref, computed, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
-import { getConversations, getConversationMessages, sendMessage, blockUser, unblockUser } from '@/api'
+import { getConversations, getConversationMessages, sendMessage, blockUser, unblockUser, getNotificationUnreadCount, getMessageUnreadCount, rebuildAiIndex } from '@/api'
 import { useUserStore } from '@/store/user'
 import { renderMarkdown } from '@/utils/markdown'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-const props = defineProps({
-  /** 未读合计（通知+私信），由 Home 轮询传入 */
-  unreadTotal: { type: Number, default: 0 }
-})
-
 const router = useRouter()
 const userStore = useUserStore()
 const myUserId = computed(() => userStore.userInfo?.userId)
+
+// 未读合计（通知+私信）：组件自己轮询，挂在 App 后所有页面都能保持红点更新
+const unreadTotal = ref(0)
+let unreadTimer = null
+
+async function loadUnreadTotal() {
+  if (!userStore.isLoggedIn) return
+  try {
+    const [noticeRes, messageRes] = await Promise.all([getNotificationUnreadCount(), getMessageUnreadCount()])
+    unreadTotal.value = noticeRes.data + messageRes.data
+  } catch (e) {
+    // 轮询失败静默忽略，下次再试
+  }
+}
 
 const expanded = ref(false)
 const conversations = ref([])
@@ -157,6 +184,7 @@ function formatTime(date) {
 function openPanel() {
   expanded.value = true
   loadConversations()
+  loadUnreadTotal()
 }
 
 async function loadConversations() {
@@ -174,6 +202,12 @@ async function loadConversations() {
 function openAiChat() {
   aiChatActive.value = true
   activePeerId.value = null
+}
+
+// 点击参考文章卡片：收起面板并跳转到文章详情页
+function openArticle(articleId) {
+  expanded.value = false
+  router.push(`/article/${articleId}`)
 }
 
 async function openConversation(c) {
@@ -243,6 +277,25 @@ function goMessageCenter() {
   router.push('/messages')
 }
 
+// 管理员手动重建全量向量索引（后端异步执行，耗时与文章量有关）
+async function rebuildIndex() {
+  try {
+    await ElMessageBox.confirm(
+      '将为全部已发布文章重新生成向量索引（后台执行，耗时与文章量有关）。重建期间 AI 问答可正常使用。',
+      '重建知识库索引',
+      { type: 'warning', confirmButtonText: '开始重建', cancelButtonText: '取消' }
+    )
+  } catch (e) {
+    return
+  }
+  try {
+    await rebuildAiIndex()
+    ElMessage.success('已开始后台重建索引，完成后 AI 问答即可检索全部文章')
+  } catch (e) {
+    // 拦截器已提示
+  }
+}
+
 function scrollToBottom() {
   nextTick(() => {
     if (msgListRef.value) {
@@ -264,17 +317,112 @@ function buildAiHistory() {
   return aiMessages.value.slice(-8, -2).map(m => ({ role: m.role, content: m.content }))
 }
 
+// 最近一次收到 SSE 事件的时间戳，看门狗据此判断流是否卡死（见 sendAi）
+let lastSseActivity = 0
+
+// 解析一段 SSE 文本（事件以空行分隔）：data 行是 JSON 字符串，按事件类型处理。
+// 返回 true 表示收到了 done 事件（后端已生成完毕，连接可能还不会立即关闭）
+function parseSseEvents(text, aiMsg) {
+  for (const event of text.split('\n\n')) {
+    for (const line of event.split('\n')) {
+      if (!line.startsWith('data:')) continue
+      let payload
+      try {
+        payload = JSON.parse(line.slice(5).trim())
+      } catch (e) {
+        continue
+      }
+      lastSseActivity = Date.now()
+      if (payload.type === 'token' && typeof payload.content === 'string') {
+        aiMsg.content += payload.content
+        scrollAiToBottom()
+      } else if (payload.type === 'status' && typeof payload.message === 'string') {
+        // 阶段提示（正在检索/正在生成），展示在打字动画下方
+        aiMsg.status = payload.message
+      } else if (payload.type === 'articles' && Array.isArray(payload.data)) {
+        // 检索候选文章：先存为对照表，收尾时按 AI 输出的推荐 JSON 提取出真正推荐的卡片
+        aiMsg.candidates = payload.data
+      } else if (payload.type === 'done') {
+        return true
+      } else if (payload.type === 'error') {
+        if (!aiMsg.content) aiMessages.value.pop()
+        ElMessage.error(payload.message || 'AI 服务调用失败')
+      }
+    }
+  }
+  return false
+}
+
+// 提取回答中的推荐 JSON（{"recommend":[{articleId}]}），返回推荐 id 列表与去除 JSON 后的正文。
+// 不做固定格式正则（模型输出可能有换行/缩进/围栏差异），而是定位最后一个 "recommend"
+// 出现的位置，向前找对象起始大括号，再按括号配对截取完整 JSON 对象
+function extractRecommend(content) {
+  const idx = content.lastIndexOf('"recommend"')
+  if (idx === -1) return { ids: [], cleaned: content }
+  const start = content.lastIndexOf('{', idx)
+  if (start === -1) return { ids: [], cleaned: content }
+  let depth = 0
+  let end = -1
+  for (let i = start; i < content.length; i++) {
+    if (content[i] === '{') depth++
+    else if (content[i] === '}') {
+      depth--
+      if (depth === 0) {
+        end = i + 1
+        break
+      }
+    }
+  }
+  if (end === -1) return { ids: [], cleaned: content }
+  const jsonText = content.slice(start, end)
+  try {
+    const ids = (JSON.parse(jsonText).recommend || []).map(r => Number(r.articleId))
+    // 移除 JSON 对象，再把残留的空围栏行（```json ```）清掉
+    let cleaned = (content.slice(0, start) + content.slice(end)).trim()
+    cleaned = cleaned.replace(/```\w*\s*```/g, '').trim()
+    return { ids, cleaned }
+  } catch (e) {
+    // 模型输出的 JSON 不合法时按"无推荐"处理，不打断正常回答
+    return { ids: [], cleaned: content }
+  }
+}
+
+// 回答收尾：提取推荐 JSON 转成卡片，并从正文移除 JSON（幂等，可重复调用）
+function finalizeAiAnswer(aiMsg) {
+  const rec = extractRecommend(aiMsg.content)
+  aiMsg.content = rec.cleaned
+  aiMsg.articles = rec.ids
+    .map(id => (aiMsg.candidates || []).find(c => c.articleId === id))
+    .filter(Boolean)
+}
+
 async function sendAi() {
   const q = aiQuestion.value.trim()
   if (!q || aiSending.value) return
   aiQuestion.value = ''
   aiMessages.value.push({ role: 'user', content: q })
-  const aiMsg = { role: 'assistant', content: '' }
+  // 必须是响应式对象：流式 token 直接改 aiMsg.content / aiMsg.articles，
+  // 普通对象绕过 Vue 代理不会触发重渲染，回答只会在切换视图后才显示
+  const aiMsg = reactive({ role: 'assistant', content: '' })
   aiMessages.value.push(aiMsg)
   aiSending.value = true
   scrollAiToBottom()
 
   aiAbortController = new AbortController()
+  // 兜底看门狗：SSE 连接迟迟不结束（如后端流未关闭）时强制中止，防止"停止"按钮永远卡在生成中
+  let watchdog = null
+  let watchdogAborted = false
+  lastSseActivity = Date.now()
+  watchdog = setInterval(() => {
+    if (!aiSending.value) {
+      clearInterval(watchdog)
+      return
+    }
+    if (Date.now() - lastSseActivity > 20000) {
+      watchdogAborted = true
+      aiAbortController.abort()
+    }
+  }, 5000)
   try {
     // EventSource 不支持 POST/自定义请求头，这里用 fetch + ReadableStream 手动解析 SSE
     const res = await fetch('/api/ai/chat', {
@@ -301,40 +449,33 @@ async function sendAi() {
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
-      // SSE 事件以空行分隔，data 行是 JSON 字符串
+      // 按完整事件切分后逐条解析，尾部不完整的事件留回缓冲区
       const events = buffer.split('\n\n')
       buffer = events.pop()
-      for (const event of events) {
-        for (const line of event.split('\n')) {
-          if (!line.startsWith('data:')) continue
-          let payload
-          try {
-            payload = JSON.parse(line.slice(5).trim())
-          } catch (e) {
-            continue
-          }
-          if (payload.type === 'token') {
-            aiMsg.content += payload.content
-            scrollAiToBottom()
-          } else if (payload.type === 'error') {
-            if (!aiMsg.content) aiMessages.value.pop()
-            ElMessage.error(payload.message || 'AI 服务调用失败')
-          }
-        }
-      }
+      // 收到 done 事件即视为回答完成，立即收尾——不依赖连接关闭（部分环境下连接迟迟不关）
+      if (parseSseEvents(events.join('\n\n'), aiMsg)) break
     }
+    // 流结束时缓冲区里可能残留最后一个事件（末尾不一定带空行），补一次解析防止丢 token
+    parseSseEvents(buffer, aiMsg)
+    finalizeAiAnswer(aiMsg)
     if (!aiMsg.content) {
       aiMessages.value.pop()
       ElMessage.warning('AI 未返回内容，请重试')
     }
   } catch (e) {
     if (e.name === 'AbortError') {
-      // 用户主动停止，保留已生成的部分
+      // 用户主动停止/看门狗超时：保留已生成的部分；看门狗超时且无内容：提示重试
+      finalizeAiAnswer(aiMsg)
+      if (watchdogAborted && !aiMsg.content) {
+        aiMessages.value.pop()
+        ElMessage.warning('AI 响应超时，请重试')
+      }
     } else {
       aiMessages.value.pop()
       ElMessage.error('网络异常，请稍后重试')
     }
   } finally {
+    clearInterval(watchdog)
     aiSending.value = false
     aiAbortController = null
     scrollAiToBottom()
@@ -358,11 +499,21 @@ watch(expanded, (val) => {
   }
 })
 
+onMounted(() => {
+  loadUnreadTotal()
+  // 每 30 秒轮询一次未读数（与面板展开时的会话刷新相互独立）
+  unreadTimer = setInterval(loadUnreadTotal, 30000)
+})
+
 onUnmounted(() => {
   stopAi()
   if (refreshTimer) {
     clearInterval(refreshTimer)
     refreshTimer = null
+  }
+  if (unreadTimer) {
+    clearInterval(unreadTimer)
+    unreadTimer = null
   }
 })
 </script>
@@ -525,6 +676,98 @@ onUnmounted(() => {
 .chat-msg.mine .chat-bubble {
   background: #409eff;
   color: #fff;
+}
+/* AI 等待回答的打字动画：三个圆点依次弹跳 */
+.typing-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.typing-status {
+  font-size: 12px;
+  color: #a8abb2;
+}
+.typing-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 2px;
+  min-width: 30px;
+}
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #a8abb2;
+  animation: typing-bounce 1.2s infinite ease-in-out;
+}
+.typing-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes typing-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+/* AI 消息纵向容器：气泡下方挂参考文章卡片 */
+.chat-msg-col {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 85%;
+}
+.ai-article-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.ai-cards-title {
+  font-size: 11px;
+  color: #909399;
+  padding-left: 2px;
+}
+.ai-article-card {
+  width: 100%;
+  box-sizing: border-box;
+  background: #fff;
+  border: 1px solid #e4e7ed;
+  border-left: 3px solid #409eff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.ai-article-card:hover {
+  box-shadow: 0 2px 10px rgba(64, 158, 255, 0.2);
+  transform: translateX(2px);
+}
+.ai-card-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-card-summary {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .ai-welcome {
   text-align: center;
