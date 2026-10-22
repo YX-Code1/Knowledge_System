@@ -24,8 +24,10 @@ public class ArticleController {
             @RequestParam(defaultValue = "10") int size,
             @RequestParam(required = false) Long categoryId,
             @RequestParam(required = false) Long tagId,
-            @RequestParam(required = false) String keyword) {
-        Page<ArticleVO> articles = articleService.getArticles(page, size, categoryId, tagId, keyword);
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String sort,
+            @RequestParam(required = false) Boolean freeOnly) {
+        Page<ArticleVO> articles = articleService.getArticles(page, size, categoryId, tagId, keyword, sort, freeOnly);
         return Result.success(articles);
     }
 

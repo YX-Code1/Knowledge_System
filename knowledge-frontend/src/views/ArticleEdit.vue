@@ -19,16 +19,15 @@
             </div>
           </el-form-item>
           <el-form-item label="分类" prop="categoryId">
-            <el-select v-model="form.categoryId" placeholder="请选择分类" style="width: 100%">
-              <!-- 只能选择叶子分类（没有子分类的分类），非叶子分类禁用 -->
-              <el-option
-                v-for="cat in categories"
-                :key="cat.id"
-                :label="isLeaf(cat.id) ? cat.name : `${cat.name}（含子分类）`"
-                :value="cat.id"
-                :disabled="!isLeaf(cat.id)"
-              />
-            </el-select>
+            <!-- 树形下拉：父分类只用于分组，只有末级分类可选 -->
+            <el-tree-select
+              v-model="form.categoryId"
+              :data="categorySelectTree"
+              placeholder="请选择分类"
+              default-expand-all
+              style="width: 100%"
+            />
+            <div class="category-tip">仅末级分类可选，带子分类的分类只用于分组</div>
           </el-form-item>
           <el-form-item label="标签">
             <div style="width: 100%">
@@ -86,11 +85,27 @@ const rules = {
   content: [{ required: true, message: '请输入内容', trigger: 'blur' }]
 }
 
-// 被用作父分类的分类ID集合（非叶子分类不可选）
-const parentIdSet = computed(() => new Set(categories.value.map(c => c.parentId)))
-function isLeaf(id) {
-  return !parentIdSet.value.has(id)
-}
+// 分类下拉树：父分类只用于分组（disabled），只有末级分类可以选中
+const categorySelectTree = computed(() => {
+  const childrenMap = new Map()
+  categories.value.forEach(c => {
+    const key = c.parentId || 0
+    if (!childrenMap.has(key)) childrenMap.set(key, [])
+    childrenMap.get(key).push(c)
+  })
+  const build = (pid) => (childrenMap.get(pid) || [])
+    .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+    .map(c => {
+      const children = build(c.id)
+      return {
+        value: c.id,
+        label: c.name,
+        disabled: children.length > 0,
+        children
+      }
+    })
+  return build(0)
+})
 
 async function handleSubmit() {
   await formRef.value.validate()
@@ -180,5 +195,11 @@ onMounted(async () => {
   color: #909399;
   margin-left: 8px;
   line-height: 32px;
+}
+.category-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  margin-top: 6px;
 }
 </style>

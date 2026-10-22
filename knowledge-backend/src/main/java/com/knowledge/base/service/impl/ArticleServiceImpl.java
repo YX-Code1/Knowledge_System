@@ -92,7 +92,8 @@ public class ArticleServiceImpl implements ArticleService {
     private BalanceLogMapper balanceLogMapper;
 
     @Override
-    public Page<ArticleVO> getArticles(int page, int size, Long categoryId, Long tagId, String keyword) {
+    public Page<ArticleVO> getArticles(int page, int size, Long categoryId, Long tagId, String keyword,
+                                       String sort, Boolean freeOnly) {
         Page<Article> articlePage = new Page<>(page, size);
         LambdaQueryWrapper<Article> wrapper = new LambdaQueryWrapper<>();
 
@@ -113,8 +114,19 @@ public class ArticleServiceImpl implements ArticleService {
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(Article::getTitle, keyword).or().like(Article::getSummary, keyword));
         }
+        if (Boolean.TRUE.equals(freeOnly)) {
+            // 免费文章：price 为 NULL 或 0
+            wrapper.and(w -> w.isNull(Article::getPrice).or().le(Article::getPrice, BigDecimal.ZERO));
+        }
         wrapper.eq(Article::getStatus, 1);
-        wrapper.orderByDesc(Article::getLikeCount);
+        if ("latest".equals(sort)) {
+            wrapper.orderByDesc(Article::getCreateTime).orderByDesc(Article::getId);
+        } else if ("hot".equals(sort)) {
+            wrapper.orderByDesc(Article::getViewCount).orderByDesc(Article::getLikeCount);
+        } else {
+            // 未传 sort 时保持原有默认排序，兼容旧调用
+            wrapper.orderByDesc(Article::getLikeCount);
+        }
 
         Page<Article> result = articleMapper.selectPage(articlePage, wrapper);
         // 列表不返回正文，防止付费内容泄露，同时减小响应体

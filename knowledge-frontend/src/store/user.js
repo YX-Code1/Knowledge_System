@@ -49,7 +49,8 @@ export const useUserStore = defineStore('user', () => {
     const res = await getProfile()
     const d = res.data
     updateUserInfo({
-      userId: d.userId,
+      // 资料接口返回的主键字段是 id（登录接口才是 userId）
+      userId: d.id,
       username: d.username,
       nickname: d.nickname,
       role: d.role,

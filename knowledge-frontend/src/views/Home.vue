@@ -1,15 +1,17 @@
 <template>
   <div>
-    <!-- 顶部导航 -->
-    <div class="page-header">
-      <div class="container">
+    <!-- 顶部导航：标题 / 居中搜索 / 操作区 -->
+    <div class="page-header home-header">
+      <div class="container header-container">
         <div class="header-left">
           <h1 class="page-title">知识库</h1>
+        </div>
+        <div class="header-search">
           <el-input
             v-model="keyword"
-            placeholder="搜索文章..."
+            class="search-input"
+            placeholder="搜索文章标题或摘要..."
             prefix-icon="Search"
-            style="width: 300px; margin-left: 20px"
             clearable
             @keyup.enter="handleSearch"
             @clear="handleSearch"
@@ -29,7 +31,7 @@
             <el-dropdown @command="handleCommand">
               <span class="user-info">
                 <el-avatar :size="32" :src="userStore.userInfo?.avatar" icon="UserFilled" />
-                <span style="margin-left: 8px">{{ userStore.userInfo?.nickname }}</span>
+                <span class="user-name" style="margin-left: 8px">{{ userStore.userInfo?.nickname }}</span>
               </span>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -52,56 +54,70 @@
       </div>
     </div>
 
-    <div class="container" style="display: flex; gap: 20px; padding-top: 20px;">
-      <!-- 左侧分类 -->
-      <div class="sidebar">
-        <div class="sidebar-card">
-          <h3 class="sidebar-title">文章分类</h3>
-          <div class="category-list">
-            <div
-              v-for="cat in categoryTree"
-              :key="cat.id"
-              class="category-item"
-              :class="{ active: activeCategory === cat.id }"
-              :style="{ paddingLeft: (8 + cat.depth * 16) + 'px' }"
-              @click="handleCategorySelect(cat.id)"
-            >
-              <span
-                v-if="cat.hasChildren"
-                class="cat-arrow"
-                :class="{ expanded: cat.expanded }"
-                @click.stop="toggleExpand(cat.id)"
-              >
-                <el-icon><ArrowRight /></el-icon>
-              </span>
-              <span v-else class="cat-arrow-placeholder"></span>
-              <span class="category-name">{{ cat.name }}</span>
-              <span class="category-count">{{ cat.articleCount || 0 }}</span>
-            </div>
-          </div>
-        </div>
+    <div class="container content-layout">
+      <!-- 左侧分类/标签：桌面端固定跟随滚动 -->
+      <aside class="sidebar">
+        <HomeSidebar
+          :category-tree="categoryTree"
+          :active-category="activeCategory"
+          :tags="tags"
+          :visible-tags="visibleTags"
+          :active-tag="activeTag"
+          :show-all-tags="showAllTags"
+          :tag-limit="HOT_TAG_LIMIT"
+          @category-select="handleCategorySelect"
+          @toggle-expand="toggleExpand"
+          @tag-click="handleTagClick"
+          @toggle-show-all="showAllTags = !showAllTags"
+        />
+      </aside>
 
-        <div class="sidebar-card" style="margin-top: 16px;">
-          <h3 class="sidebar-title">热门标签</h3>
-          <div class="tag-cloud">
-            <el-tag
-              v-for="tag in visibleTags"
-              :key="tag.id"
-              :type="activeTag === tag.id ? 'primary' : 'info'"
-              class="tag-item"
-              @click="handleTagClick(tag.id)"
-            >
-              {{ tag.name }}<span v-if="tag.articleCount > 0" class="tag-count">{{ tag.articleCount }}</span>
-            </el-tag>
+      <!-- 移动端：筛选抽屉（复用同一份侧栏组件） -->
+      <el-drawer v-model="mobileFilterOpen" title="筛选" direction="rtl" size="300px">
+        <HomeSidebar
+          :category-tree="categoryTree"
+          :active-category="activeCategory"
+          :tags="tags"
+          :visible-tags="visibleTags"
+          :active-tag="activeTag"
+          :show-all-tags="showAllTags"
+          :tag-limit="HOT_TAG_LIMIT"
+          @category-select="handleMobileCategorySelect"
+          @toggle-expand="toggleExpand"
+          @tag-click="handleMobileTagClick"
+          @toggle-show-all="showAllTags = !showAllTags"
+        />
+        <template #footer>
+          <div class="drawer-footer">
+            <el-button @click="handleMobileClearAll">清除全部</el-button>
+            <el-button type="primary" @click="mobileFilterOpen = false">完成</el-button>
           </div>
-          <div v-if="tags.length > HOT_TAG_LIMIT" class="tag-toggle" @click="showAllTags = !showAllTags">
-            {{ showAllTags ? '收起' : `全部标签 (${tags.length})` }}
-          </div>
-        </div>
-      </div>
+        </template>
+      </el-drawer>
 
       <!-- 文章列表 -->
       <div class="main-content">
+        <!-- 排序栏 -->
+        <div class="toolbar">
+          <div class="sort-tabs">
+            <span
+              v-for="tab in sortTabs"
+              :key="tab.key"
+              class="sort-tab"
+              :class="{ active: activeSort === tab.key }"
+              @click="handleSortChange(tab.key)"
+            >
+              {{ tab.label }}
+            </span>
+          </div>
+          <div class="toolbar-right">
+            <span class="result-count" v-if="!loading">共 {{ total }} 篇</span>
+            <el-button class="mobile-filter-btn" @click="mobileFilterOpen = true">
+              <el-icon><Filter /></el-icon> 筛选
+            </el-button>
+          </div>
+        </div>
+
         <!-- 筛选条件栏 -->
         <div class="filter-bar" v-if="hasActiveFilter">
           <span class="filter-label">筛选：</span>
@@ -117,22 +133,44 @@
           <el-button text type="primary" size="small" @click="clearAllFilters">清除全部</el-button>
         </div>
 
-        <div v-loading="loading" class="article-list">
+        <!-- 首次加载骨架屏 -->
+        <div v-if="loading && articles.length === 0" class="article-list">
+          <div v-for="i in 5" :key="i" class="article-card skeleton-card">
+            <el-skeleton animated>
+              <template #template>
+                <el-skeleton-item variant="h3" style="width: 42%" />
+                <el-skeleton-item variant="text" style="width: 92%; margin-top: 14px" />
+                <el-skeleton-item variant="text" style="width: 68%; margin-top: 8px" />
+                <div class="skeleton-meta">
+                  <el-skeleton-item variant="text" style="width: 64px" />
+                  <el-skeleton-item variant="text" style="width: 64px" />
+                  <el-skeleton-item variant="text" style="width: 140px; margin-left: auto" />
+                </div>
+              </template>
+            </el-skeleton>
+          </div>
+        </div>
+
+        <div v-else v-loading="loading" class="article-list">
           <div v-for="article in articles" :key="article.id" class="article-card" @click="$router.push(`/article/${article.id}`)">
             <div class="article-card-body">
               <h3 class="article-title">{{ article.title }}</h3>
               <p class="article-summary">{{ article.summary || '暂无摘要' }}</p>
               <div class="article-meta">
-                <el-tag size="small" type="success">{{ getCategoryName(article.categoryId) }}</el-tag>
-                <!-- 付费/免费统一黄色标签，与详情页保持一致 -->
-                <el-tag size="small" type="warning">
-                  {{ Number(article.price) > 0 ? '¥' + Number(article.price).toFixed(2) : '免费' }}
-                </el-tag>
-                <el-tag v-for="tag in article.tags" :key="tag.id" size="small" type="info" style="margin-left: 4px">{{ tag.name }}</el-tag>
-                <span class="meta-item"><el-icon><View /></el-icon> {{ article.viewCount }}</span>
-                <span class="meta-item"><el-icon><Star /></el-icon> {{ article.likeCount }}</span>
-                <span class="meta-item"><el-icon><ChatDotRound /></el-icon> {{ article.commentCount }}</span>
-                <span class="meta-item">{{ formatDate(article.createTime) }}</span>
+                <div class="meta-tags">
+                  <el-tag size="small" type="success">{{ getCategoryName(article.categoryId) }}</el-tag>
+                  <!-- 付费/免费统一黄色标签，与详情页保持一致 -->
+                  <el-tag size="small" type="warning">
+                    {{ Number(article.price) > 0 ? '¥' + Number(article.price).toFixed(2) : '免费' }}
+                  </el-tag>
+                  <el-tag v-for="tag in article.tags" :key="tag.id" size="small" type="info">{{ tag.name }}</el-tag>
+                </div>
+                <div class="meta-stats">
+                  <span class="meta-item"><el-icon><View /></el-icon> {{ article.viewCount || 0 }}</span>
+                  <span class="meta-item"><el-icon><Star /></el-icon> {{ article.likeCount || 0 }}</span>
+                  <span class="meta-item"><el-icon><ChatDotRound /></el-icon> {{ article.commentCount || 0 }}</span>
+                  <span class="meta-item meta-date">{{ formatDate(article.createTime) }}</span>
+                </div>
               </div>
             </div>
           </div>
@@ -162,11 +200,17 @@ import { getArticles, getCategories, getTags, getNotificationUnreadCount, getMes
 import { useUserStore } from '@/store/user'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import HomeSidebar from '@/components/HomeSidebar.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
 
 const HOT_TAG_LIMIT = 10
+const sortTabs = [
+  { key: 'latest', label: '最新' },
+  { key: 'hot', label: '最热' },
+  { key: 'free', label: '免费' }
+]
 
 const articles = ref([])
 const categories = ref([])
@@ -178,7 +222,9 @@ const total = ref(0)
 const keyword = ref('')
 const activeCategory = ref(null)
 const activeTag = ref(null)
+const activeSort = ref('latest')
 const showAllTags = ref(false)
+const mobileFilterOpen = ref(false)
 // 已展开的分类集合（默认全折叠，所以初始为空）
 const expandedIds = ref(new Set())
 
@@ -241,7 +287,12 @@ function formatDate(date) {
 async function loadArticles() {
   loading.value = true
   try {
-    const params = { page: page.value, size: pageSize.value }
+    const params = {
+      page: page.value,
+      size: pageSize.value,
+      sort: activeSort.value === 'hot' ? 'hot' : 'latest'
+    }
+    if (activeSort.value === 'free') params.freeOnly = true
     if (activeCategory.value) params.categoryId = activeCategory.value
     if (activeTag.value) params.tagId = activeTag.value
     if (keyword.value) params.keyword = keyword.value
@@ -268,8 +319,15 @@ function handleSearch() {
   loadArticles()
 }
 
+function handleSortChange(key) {
+  if (activeSort.value === key) return
+  activeSort.value = key
+  page.value = 1
+  loadArticles()
+}
+
 function handleCategorySelect(id) {
-  // 点同一分类取消筛选，点其他分类切换（标签筛选保留，可叠加）
+  // 点同一分类取消筛选，点“全部文章”（id 为 null）直接清空分类
   activeCategory.value = activeCategory.value === id ? null : id
   page.value = 1
   loadArticles()
@@ -306,6 +364,22 @@ function clearAllFilters() {
   keyword.value = ''
   page.value = 1
   loadArticles()
+}
+
+// 移动端抽屉选择后自动收起
+function handleMobileCategorySelect(id) {
+  handleCategorySelect(id)
+  mobileFilterOpen.value = false
+}
+
+function handleMobileTagClick(id) {
+  handleTagClick(id)
+  mobileFilterOpen.value = false
+}
+
+function handleMobileClearAll() {
+  clearAllFilters()
+  mobileFilterOpen.value = false
 }
 
 function handleCommand(command) {
@@ -360,120 +434,103 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.header-left {
+.header-container {
   display: flex;
   align-items: center;
+  gap: 20px;
+}
+.header-left {
+  flex-shrink: 0;
+}
+.header-search {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+}
+.search-input {
+  width: 100%;
+  max-width: 420px;
 }
 .header-right {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex-shrink: 0;
 }
 .user-info {
   display: flex;
   align-items: center;
   cursor: pointer;
 }
+.content-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding-top: 20px;
+}
 .sidebar {
   width: 240px;
   flex-shrink: 0;
-}
-.sidebar-card {
-  background: #fff;
-  border-radius: 12px;
-  padding: 16px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-}
-.sidebar-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
-  margin-bottom: 12px;
-}
-.category-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.category-item {
-  display: flex;
-  align-items: center;
-  height: 36px;
-  border-radius: 8px;
-  cursor: pointer;
-  color: #606266;
-  font-size: 14px;
-  transition: all 0.2s;
-}
-.category-item:hover {
-  background: #f5f7fa;
-}
-.category-item.active {
-  background: #ecf5ff;
-  color: #409eff;
-  font-weight: 600;
-}
-.category-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.category-count {
-  font-size: 12px;
-  color: #c0c4cc;
-  margin-right: 12px;
-}
-.category-item.active .category-count {
-  color: #409eff;
-}
-.cat-arrow {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  flex-shrink: 0;
-  margin-right: 4px;
-  font-size: 18px;
-  color: #606266;
-  border-radius: 6px;
-  transition: transform 0.2s, background 0.2s, color 0.2s;
-}
-.cat-arrow:hover {
-  background: #e4e7ed;
-  color: #409eff;
-}
-.cat-arrow.expanded {
-  transform: rotate(90deg);
-  color: #409eff;
-}
-.cat-arrow-placeholder {
-  width: 30px;
-  flex-shrink: 0;
-}
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-}
-.tag-item {
-  margin: 4px;
-  cursor: pointer;
-}
-.tag-count {
-  margin-left: 2px;
-  opacity: 0.7;
-}
-.tag-toggle {
-  margin-top: 8px;
-  text-align: center;
-  font-size: 13px;
-  color: #409eff;
-  cursor: pointer;
+  position: sticky;
+  top: 20px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 .main-content {
   flex: 1;
   min-width: 0;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fff;
+  border-radius: 12px;
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.sort-tabs {
+  display: flex;
+  gap: 2px;
+}
+.sort-tab {
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #606266;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.2s;
+}
+.sort-tab:hover {
+  background: #f5f7fa;
+  color: #409eff;
+}
+.sort-tab.active {
+  background: #ecf5ff;
+  color: #409eff;
+  font-weight: 600;
+}
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.result-count {
+  font-size: 13px;
+  color: #909399;
+}
+.mobile-filter-btn {
+  display: none;
+}
+.drawer-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
 }
 .filter-bar {
   display: flex;
@@ -492,28 +549,35 @@ onUnmounted(() => {
 .article-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 .article-card {
   background: #fff;
   border-radius: 12px;
-  padding: 20px 24px;
+  padding: 18px 22px;
+  border: 1px solid transparent;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  transition: all 0.3s;
+  transition: all 0.25s;
 }
 .article-card:hover {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
   transform: translateY(-2px);
+  border-color: #d9ecff;
 }
 .article-title {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
+  line-height: 1.4;
   color: #303133;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  transition: color 0.2s;
+}
+.article-card:hover .article-title {
+  color: #409eff;
 }
 .article-summary {
-  font-size: 14px;
+  font-size: 13.5px;
   color: #909399;
   line-height: 1.6;
   margin-bottom: 12px;
@@ -525,14 +589,47 @@ onUnmounted(() => {
 .article-meta {
   display: flex;
   align-items: center;
-  gap: 16px;
-  font-size: 13px;
-  color: #c0c4cc;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
 }
-.meta-item {
+.meta-tags {
   display: flex;
   align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.meta-stats {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  font-size: 13px;
+  color: #a8abb2;
+  white-space: nowrap;
+}
+.meta-item {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
+}
+.meta-date {
+  color: #c0c4cc;
+}
+.skeleton-card {
+  cursor: default;
+}
+.skeleton-card:hover {
+  transform: none;
+  border-color: transparent;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.skeleton-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
 }
 .pagination-wrapper {
   display: flex;
@@ -541,5 +638,71 @@ onUnmounted(() => {
   padding: 16px;
   background: #fff;
   border-radius: 12px;
+}
+
+@media (max-width: 992px) {
+  .sidebar {
+    width: 210px;
+  }
+  .search-input {
+    max-width: 320px;
+  }
+}
+
+@media (max-width: 768px) {
+  .home-header .header-container {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header-left {
+    flex: 1;
+  }
+  .header-search {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .search-input {
+    max-width: none;
+  }
+  .header-right {
+    gap: 8px;
+  }
+  .user-name {
+    display: none;
+  }
+  .content-layout {
+    gap: 0;
+    padding-top: 12px;
+  }
+  .sidebar {
+    display: none;
+  }
+  .mobile-filter-btn {
+    display: inline-flex;
+  }
+  .result-count {
+    display: none;
+  }
+  .article-card {
+    padding: 16px;
+  }
+  .article-title {
+    font-size: 16px;
+  }
+  .article-summary {
+    font-size: 13px;
+  }
+  .meta-stats {
+    width: 100%;
+    margin-left: 0;
+  }
+  .pagination-wrapper {
+    padding: 12px 8px;
+    overflow-x: auto;
+  }
+  .pagination-wrapper :deep(.el-pagination__sizes),
+  .pagination-wrapper :deep(.el-pagination__total) {
+    display: none;
+  }
 }
 </style>

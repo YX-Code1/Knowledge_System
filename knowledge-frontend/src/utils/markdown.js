@@ -6,5 +6,6 @@ import DOMPurify from 'dompurify'
 // 文章正文与 AI 回答共用此渲染入口。
 export function renderMarkdown(md) {
   if (!md) return ''
-  return DOMPurify.sanitize(marked.parse(md))
+  // breaks: true —— 单个换行也渲染成 <br>，与编辑器里直接按回车的书写习惯一致
+  return DOMPurify.sanitize(marked.parse(md, { gfm: true, breaks: true }))
 }

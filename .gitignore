@@ -17,6 +17,9 @@ knowledge-backend/src/main/resources/application-local.yml
 *.log
 logs/
 
+# 面试准备材料（仅本地留存，不入库）
+INTERVIEW_QA.md
+
 # 系统文件
 .DS_Store
 Thumbs.db
