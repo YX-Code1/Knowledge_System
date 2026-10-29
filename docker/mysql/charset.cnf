@@ -1,0 +1,16 @@
+# MySQL 字符集强制配置
+# 背景：官方镜像里 mysql 客户端默认按 latin1 连接，
+# 导入 UTF-8 的 init.sql 时会把中文字节二次编码（存进去变成 C3A8... 这种乱码）。
+# 这里从服务端和客户端两侧都锁死 utf8mb4。
+
+[mysqld]
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
+# 忽略客户端握手时声明的字符集，一律用服务端默认
+skip-character-set-client-handshake
+
+[client]
+default-character-set = utf8mb4
+
+[mysql]
+default-character-set = utf8mb4

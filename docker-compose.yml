@@ -1,0 +1,92 @@
+# 一条命令起全栈：MySQL + Redis + 后端 + 前端
+# 用法：docker compose up -d --build   访问 http://localhost:8000
+# 关掉：docker compose down            连数据一起清：docker compose down -v
+
+services:
+  mysql:
+    # 基于官方 mysql:8.0 构建，额外把 charset.cnf 打进镜像（bind mount 的文件是 777，会被 MySQL 忽略）
+    build: ./docker/mysql
+    container_name: ks-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      # 宿主机用 13306：你本机已经跑了两个 mysqld（3306 / 3307），都用不了
+      - "13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 只挂 init.sql + seed_demo_data.sql。
+      # 注意：不要整个 sql/ 目录挂进去 —— init.sql 已经是「最新完整表结构」，
+      # 而 migration_*.sql 里是 ALTER TABLE ADD COLUMN，在新库上会报 Duplicate column，
+      # 导致 mysql 容器初始化失败。migration 只用于升级已有旧库。
+      - ./knowledge-backend/src/main/resources/sql/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      - ./knowledge-backend/src/main/resources/sql/seed_demo_data.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: ks-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    ports:
+      # 同样错开端口，宿主机 6380
+      - "6380:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./knowledge-backend
+    container_name: ks-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      # 容器之间用服务名互访，不是 localhost
+      MYSQL_URL: "jdbc:mysql://mysql:3306/knowledge_base?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false"
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      # 邮件功能留空即降级（注册验证码不可用，其余功能正常）
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      # AI 功能留空即提示"未配置"，不影响其他功能
+      AI_DEEPSEEK_API_KEY: ${AI_DEEPSEEK_API_KEY:-}
+      AI_SILICONFLOW_API_KEY: ${AI_SILICONFLOW_API_KEY:-}
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build:
+      context: ./knowledge-frontend
+    container_name: ks-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8000:80"
+
+volumes:
+  mysql-data:
+  redis-data:

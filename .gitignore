@@ -13,6 +13,9 @@ knowledge-frontend/dist/
 # 本机敏感配置（真实密码只在这里，不入库；模板见 application-local.yml.example）
 knowledge-backend/src/main/resources/application-local.yml
 
+# Docker Compose 的真实取值（模板见 .env.example）
+.env
+
 # 日志
 *.log
 logs/
